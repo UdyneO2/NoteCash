@@ -18,7 +18,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -83,8 +85,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,7 +126,7 @@ fun Typography.withFont(f: FontFamily) = Typography(
 
 const val DEFAULT_SHEET_URL = "https://s.id/notecash"
 val USER_RE = Regex("^[a-z0-9_]{2,30}$")
-val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya","Target")
+val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya", "Target")
 val IN = listOf("Gaji", "Bonus", "Usaha", "Hadiah", "Lainnya")
 val AVATARS = listOf("Inisial", "Laki-laki", "Perempuan", "Kacamata", "Anak")
 val ID = Locale("id", "ID")
@@ -370,8 +370,8 @@ fun NominalKeypad(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
-            .background(BG)
-            .padding(10.dp),
+            .background(CardC)
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
@@ -382,7 +382,7 @@ fun NominalKeypad(
             Text(
                 text = if (value.isEmpty()) "Nominal: Rp0" else "Nominal: ${rp(value.toLongOrNull() ?: 0L)}",
                 color = Lime,
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold
             )
             if (value.isNotEmpty()) {
@@ -408,14 +408,14 @@ fun NominalKeypad(
                             }
                         },
                         shape = RoundedCornerShape(16.dp),
-                        color = if (isDel) Card2 else CardC,
-                        modifier = Modifier.weight(1f).height(48.dp)
+                        color = if (isDel) Card2 else BG,
+                        modifier = Modifier.weight(1f).height(50.dp)
                     ) {
                         Box(Modifier.fillMaxSize(), Alignment.Center) {
                             if (isDel) {
-                                Icon(Icons.AutoMirrored.Rounded.Backspace, "Hapus digit", tint = White, modifier = Modifier.size(19.dp))
+                                Icon(Icons.AutoMirrored.Rounded.Backspace, "Hapus digit", tint = White, modifier = Modifier.size(20.dp))
                             } else {
-                                Text(key, color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                Text(key, color = White, fontSize = 17.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
@@ -844,6 +844,7 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
         BottomBar(tab, { tab = it }, { edit = null; formIncome = false; showForm = true }, Modifier.align(Alignment.BottomCenter))
+
         AnimatedVisibility(
             visible = searching,
             enter = fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 6 },
@@ -851,14 +852,25 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
         ) {
             SearchScreen(all, { searching = false }) { edit = it; showForm = true }
         }
-    }
 
-    if (showForm) Form(
-        t = edit, initialIncome = formIncome,
-        onSave = { tx -> commitTx(if (edit == null) all + tx else all.map { if (it.id == tx.id) tx else it }); homeA = runCatching { LocalDate.parse(tx.d) }.getOrDefault(homeA); showForm = false },
-        onDel = edit?.let { e -> { commitTx(all.filter { it.id != e.id }); showForm = false } },
-        onClose = { showForm = false }
-    )
+        AnimatedVisibility(
+            visible = showForm,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 12 },
+            exit = fadeOut(tween(220)) + slideOutVertically(tween(220)) { it / 12 }
+        ) {
+            Form(
+                t = edit,
+                initialIncome = formIncome,
+                onSave = { tx ->
+                    commitTx(if (edit == null) all + tx else all.map { if (it.id == tx.id) tx else it })
+                    homeA = runCatching { LocalDate.parse(tx.d) }.getOrDefault(homeA)
+                    showForm = false
+                },
+                onDel = edit?.let { e -> { commitTx(all.filter { it.id != e.id }); showForm = false } },
+                onClose = { showForm = false }
+            )
+        }
+    }
 }
 
 @Composable
@@ -1002,101 +1014,114 @@ fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit
     val totalSaved = goals.sumOf { it.saved }
     val overallPct = if (totalTarget > 0) ((totalSaved * 100) / totalTarget).coerceIn(0L, 100L).toInt() else 0
 
-    LazyColumn(
-        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)
-    ) {
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Target", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-                    AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)
+        ) {
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Target", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
+                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
+                        }
+                    }
+                    Surface(onClick = { editingGoal = null; showDialog = true }, shape = CircleShape, color = Blue) {
+                        Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Rounded.Add, null, tint = White, modifier = Modifier.size(18.dp))
+                            Text("Target baru", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
                     }
                 }
-                Surface(onClick = { editingGoal = null; showDialog = true }, shape = CircleShape, color = Blue) {
-                    Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Icon(Icons.Rounded.Add, null, tint = White, modifier = Modifier.size(18.dp))
-                        Text("Target baru", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            }
+            item {
+                Panel {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(Icons.Rounded.Flag, bg = Lime, tint = BG)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Total terkumpul", color = Muted, fontSize = 13.sp)
+                            Money(totalSaved, 28.sp)
+                        }
+                        Pill("$overallPct%", Blue, White)
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    AnimatedBar(fraction = if (totalTarget > 0) totalSaved.toFloat() / totalTarget else 0f, fillColor = Lime)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (totalTarget > 0) "Dari total target " + rp(totalTarget) + " (${goals.size} target)" else "Belum ada target tabungan yang dibuat",
+                        color = Muted, fontSize = 12.sp
+                    )
+                }
+            }
+            if (goals.isEmpty()) {
+                item {
+                    Panel {
+                        Text("Mulai tetapkan tujuanmu", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Buat target seperti Dana Darurat, Beli Laptop, atau Liburan dan pantau progresnya secara otomatis.", color = Muted, fontSize = 13.sp)
+                    }
+                }
+            }
+            items(goals, key = { it.id }) { g ->
+                val pct = if (g.target > 0) ((g.saved * 100) / g.target).coerceIn(0L, 100L).toInt() else 0
+                val done = g.saved >= g.target && g.target > 0
+                Panel {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.weight(1f)) {
+                            Text(g.title, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            if (g.deadline.isNotBlank()) Text("Batas waktu: ${g.deadline}", color = Muted, fontSize = 12.sp)
+                        }
+                        Pill(if (done) "Tercapai" else "$pct%", if (done) Green else Card2, if (done) BG else White)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(rp(g.saved), color = Lime, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Target " + rp(g.target), color = Muted, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    AnimatedBar(fraction = if (g.target > 0) g.saved.toFloat() / g.target else 0f, fillColor = if (done) Green else Blue)
+                    Spacer(Modifier.height(14.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(onClick = { topupGoal = g }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(42.dp)) {
+                            Box(Modifier.fillMaxSize(), Alignment.Center) { Text("+ Tambah Dana", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+                        }
+                        Surface(onClick = { editingGoal = g; showDialog = true }, shape = CircleShape, color = Card2, modifier = Modifier.height(42.dp)) {
+                            Box(Modifier.padding(horizontal = 16.dp), Alignment.Center) { Text("Ubah", color = White, fontSize = 13.sp) }
+                        }
                     }
                 }
             }
         }
-        item {
-            Panel {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconCircle(Icons.Rounded.Flag, bg = Lime, tint = BG)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Total terkumpul", color = Muted, fontSize = 13.sp)
-                        Money(totalSaved, 28.sp)
-                    }
-                    Pill("$overallPct%", Blue, White)
-                }
-                Spacer(Modifier.height(14.dp))
-                AnimatedBar(fraction = if (totalTarget > 0) totalSaved.toFloat() / totalTarget else 0f, fillColor = Lime)
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    if (totalTarget > 0) "Dari total target " + rp(totalTarget) + " (${goals.size} target)" else "Belum ada target tabungan yang dibuat",
-                    color = Muted, fontSize = 12.sp
+
+        AnimatedVisibility(
+            visible = showDialog,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 12 },
+            exit = fadeOut(tween(220)) + slideOutVertically(tween(220)) { it / 12 }
+        ) {
+            GoalDialog(
+                goal = editingGoal,
+                onSave = { onSaveGoal(it); showDialog = false },
+                onDelete = editingGoal?.let { e -> { onDeleteGoal(e.id); showDialog = false } },
+                onClose = { showDialog = false }
+            )
+        }
+
+        AnimatedVisibility(
+            visible = topupGoal != null,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 12 },
+            exit = fadeOut(tween(220)) + slideOutVertically(tween(220)) { it / 12 }
+        ) {
+            topupGoal?.let { g ->
+                TopupGoalDialog(
+                    goal = g,
+                    onAdd = { addAmt -> onSaveGoal(g.copy(saved = (g.saved + addAmt).coerceAtLeast(0L))); topupGoal = null },
+                    onClose = { topupGoal = null }
                 )
             }
         }
-        if (goals.isEmpty()) {
-            item {
-                Panel {
-                    Text("Mulai tetapkan tujuanmu", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(4.dp))
-                    Text("Buat target seperti Dana Darurat, Beli Laptop, atau Liburan dan pantau progresnya secara otomatis.", color = Muted, fontSize = 13.sp)
-                }
-            }
-        }
-        items(goals, key = { it.id }) { g ->
-            val pct = if (g.target > 0) ((g.saved * 100) / g.target).coerceIn(0L, 100L).toInt() else 0
-            val done = g.saved >= g.target && g.target > 0
-            Panel {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.weight(1f)) {
-                        Text(g.title, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        if (g.deadline.isNotBlank()) Text("Batas waktu: ${g.deadline}", color = Muted, fontSize = 12.sp)
-                    }
-                    Pill(if (done) "Tercapai" else "$pct%", if (done) Green else Card2, if (done) BG else White)
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(rp(g.saved), color = Lime, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Target " + rp(g.target), color = Muted, fontSize = 13.sp)
-                }
-                Spacer(Modifier.height(8.dp))
-                AnimatedBar(fraction = if (g.target > 0) g.saved.toFloat() / g.target else 0f, fillColor = if (done) Green else Blue)
-                Spacer(Modifier.height(14.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(onClick = { topupGoal = g }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(42.dp)) {
-                        Box(Modifier.fillMaxSize(), Alignment.Center) { Text("+ Tambah Dana", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
-                    }
-                    Surface(onClick = { editingGoal = g; showDialog = true }, shape = CircleShape, color = Card2, modifier = Modifier.height(42.dp)) {
-                        Box(Modifier.padding(horizontal = 16.dp), Alignment.Center) { Text("Ubah", color = White, fontSize = 13.sp) }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showDialog) {
-        GoalDialog(
-            goal = editingGoal,
-            onSave = { onSaveGoal(it); showDialog = false },
-            onDelete = editingGoal?.let { e -> { onDeleteGoal(e.id); showDialog = false } },
-            onClose = { showDialog = false }
-        )
-    }
-    topupGoal?.let { g ->
-        TopupGoalDialog(
-            goal = g,
-            onAdd = { addAmt -> onSaveGoal(g.copy(saved = (g.saved + addAmt).coerceAtLeast(0L))); topupGoal = null },
-            onClose = { topupGoal = null }
-        )
     }
 }
 
@@ -1107,105 +1132,168 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
     var saved by remember { mutableStateOf(goal?.saved?.toString() ?: "0") }
     var deadline by remember { mutableStateOf(goal?.deadline?.ifBlank { null } ?: LocalDate.now().plusMonths(3).toString()) }
     var activeNominalField by remember { mutableStateOf(0) }
+    BackHandler(onBack = onClose)
 
-    AlertDialog(
-        onDismissRequest = onClose,
-        shape = RoundedCornerShape(28.dp),
-        containerColor = CardC,
-        title = { Text(if (goal == null) "Target baru" else "Ubah target", color = White) },
-        text = {
-            Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text("Nama target") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = target,
-                    onValueChange = { target = it.filter(Char::isDigit) },
-                    modifier = Modifier.fillMaxWidth().clickable { activeNominalField = 0 },
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text("Nominal target (Rp)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = saved,
-                    onValueChange = { saved = it.filter(Char::isDigit) },
-                    modifier = Modifier.fillMaxWidth().clickable { activeNominalField = 1 },
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text("Sudah terkumpul (Rp)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(activeNominalField == 0, { activeNominalField = 0 }, { Text("Keypad: Target") })
-                    FilterChip(activeNominalField == 1, { activeNominalField = 1 }, { Text("Keypad: Terkumpul") })
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BG)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 14.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(onClick = onClose, shape = CircleShape, color = Card2) {
+                    Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
                 }
-                NominalKeypad(
-                    value = if (activeNominalField == 0) target else saved,
-                    onChange = { v -> if (activeNominalField == 0) target = v else saved = v }
-                )
-                CalendarDatePicker(
-                    date = deadline,
-                    label = "Batas waktu target",
-                    onDateSelected = { deadline = it }
-                )
+                Text(if (goal == null) "Target baru" else "Ubah target", color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
             }
-        },
-        confirmButton = {
-            TextButton({
-                val tg = target.toLongOrNull() ?: 0L
-                val sv = saved.toLongOrNull() ?: 0L
-                if (title.isNotBlank() && tg > 0) onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, deadline))
-            }) { Text("Simpan", color = Blue) }
-        },
-        dismissButton = {
-            Row {
-                if (onDelete != null) IconButton(onDelete) { Icon(Icons.Rounded.Delete, "Hapus", tint = Red) }
-                TextButton(onClose) { Text("Batal", color = Muted) }
+            if (onDelete != null) {
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Rounded.Delete, "Hapus", tint = Red)
+                }
             }
         }
-    )
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                label = { Text("Nama target") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = target,
+                onValueChange = { target = it.filter(Char::isDigit) },
+                modifier = Modifier.fillMaxWidth().clickable { activeNominalField = 0 },
+                shape = RoundedCornerShape(16.dp),
+                label = { Text("Nominal target (Rp)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = saved,
+                onValueChange = { saved = it.filter(Char::isDigit) },
+                modifier = Modifier.fillMaxWidth().clickable { activeNominalField = 1 },
+                shape = RoundedCornerShape(16.dp),
+                label = { Text("Sudah terkumpul (Rp)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(activeNominalField == 0, { activeNominalField = 0 }, { Text("Keypad: Target") })
+                FilterChip(activeNominalField == 1, { activeNominalField = 1 }, { Text("Keypad: Terkumpul") })
+            }
+            NominalKeypad(
+                value = if (activeNominalField == 0) target else saved,
+                onChange = { v -> if (activeNominalField == 0) target = v else saved = v }
+            )
+            CalendarDatePicker(
+                date = deadline,
+                label = "Batas waktu target",
+                onDateSelected = { deadline = it }
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(52.dp)) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Batal", color = Muted, fontWeight = FontWeight.Medium) }
+            }
+            Surface(
+                onClick = {
+                    val tg = target.toLongOrNull() ?: 0L
+                    val sv = saved.toLongOrNull() ?: 0L
+                    if (title.isNotBlank() && tg > 0) onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, deadline))
+                },
+                shape = CircleShape,
+                color = Blue,
+                modifier = Modifier.weight(1.4f).height(52.dp)
+            ) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Simpan", color = White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
+            }
+        }
+    }
 }
 
 @Composable
 fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
     var amount by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onClose,
-        shape = RoundedCornerShape(28.dp),
-        containerColor = CardC,
-        title = { Text("Tambah ke ${goal.title}", color = White) },
-        text = {
-            Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text("Terkumpul saat ini: " + rp(goal.saved) + " / " + rp(goal.target), color = Muted, fontSize = 13.sp)
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it.filter(Char::isDigit) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text("Nominal tambahan (Rp)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
-                NominalKeypad(value = amount, onChange = { amount = it })
+    BackHandler(onBack = onClose)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BG)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 14.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2) {
+                Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
             }
-        },
-        confirmButton = {
-            TextButton({ val v = amount.toLongOrNull() ?: 0L; if (v > 0) onAdd(v) }) { Text("Tambah", color = Blue) }
-        },
-        dismissButton = { TextButton(onClose) { Text("Batal", color = Muted) } }
-    )
+            Text("Tambah ke ${goal.title}", color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Terkumpul saat ini: " + rp(goal.saved) + " / " + rp(goal.target), color = Muted, fontSize = 13.sp)
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = it.filter(Char::isDigit) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                label = { Text("Nominal tambahan (Rp)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+            NominalKeypad(value = amount, onChange = { amount = it })
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(52.dp)) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Batal", color = Muted, fontWeight = FontWeight.Medium) }
+            }
+            Surface(
+                onClick = { val v = amount.toLongOrNull() ?: 0L; if (v > 0) onAdd(v) },
+                shape = CircleShape,
+                color = Blue,
+                modifier = Modifier.weight(1.4f).height(52.dp)
+            ) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Tambah", color = White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -1400,7 +1488,7 @@ fun SettingsScreen(
                     Text(user, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync otomatis aktif · tab \"$user\"",
+                            if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync aktif"",
                             color = if (syncing) Lime else Muted, fontSize = 13.sp
                         )
                         AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
@@ -1452,116 +1540,108 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
     var amt by remember { mutableStateOf(t?.a?.toString() ?: "") }
     var date by remember { mutableStateOf(t?.d?.ifBlank { null } ?: LocalDate.now().toString()) }
     var note by remember { mutableStateOf(t?.n ?: "") }
+    BackHandler(onBack = onClose)
 
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BG)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = BG
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(onClick = onClose, shape = CircleShape, color = Card2) {
+                    Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
+                }
+                Text(
+                    if (t == null) "Catat transaksi" else "Ubah transaksi",
+                    color = White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (onDel != null) {
+                IconButton(onClick = onDel) {
+                    Icon(Icons.Rounded.Delete, "Hapus", tint = Red)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(!inc, { inc = false; cat = OUT[0] }, { Text("Pengeluaran") })
+                FilterChip(inc, { inc = true; cat = IN[0] }, { Text("Pemasukan") })
+            }
+
+            OutlinedTextField(
+                value = amt,
+                onValueChange = { amt = it.filter(Char::isDigit) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                label = { Text("Jumlah (Rp)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+
+            NominalKeypad(value = amt, onChange = { amt = it })
+
+            Text("Kategori", color = Muted, fontSize = 13.sp)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                (if (inc) IN else OUT).forEach {
+                    FilterChip(cat == it, { cat = it }, { Text(it) })
+                }
+            }
+
+            CalendarDatePicker(date = date, label = "Tanggal transaksi", onDateSelected = { date = it })
+
+            OutlinedTextField(
+                value = note,
+                onValueChange = { note = it },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                label = { Text("Catatan") },
+                singleLine = true
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Surface(
+                onClick = onClose,
+                shape = CircleShape,
+                color = Card2,
+                modifier = Modifier.weight(1f).height(52.dp)
             ) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Surface(onClick = onClose, shape = CircleShape, color = Card2) {
-                            Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
-                        }
-                        Text(
-                            if (t == null) "Catat transaksi" else "Ubah transaksi",
-                            color = White,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    if (onDel != null) {
-                        IconButton(onClick = onDel) {
-                            Icon(Icons.Rounded.Delete, "Hapus", tint = Red)
-                        }
-                    }
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text("Batal", color = Muted, fontWeight = FontWeight.Medium)
                 }
-
-                Spacer(Modifier.height(12.dp))
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(!inc, { inc = false; cat = OUT[0] }, { Text("Pengeluaran") })
-                        FilterChip(inc, { inc = true; cat = IN[0] }, { Text("Pemasukan") })
-                    }
-
-                    OutlinedTextField(
-                        value = amt,
-                        onValueChange = { amt = it.filter(Char::isDigit) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        label = { Text("Jumlah (Rp)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true
-                    )
-
-                    NominalKeypad(value = amt, onChange = { amt = it })
-
-                    Text("Kategori", color = Muted, fontSize = 13.sp)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        (if (inc) IN else OUT).forEach {
-                            FilterChip(cat == it, { cat = it }, { Text(it) })
-                        }
-                    }
-
-                    CalendarDatePicker(date = date, label = "Tanggal transaksi", onDateSelected = { date = it })
-
-                    OutlinedTextField(
-                        value = note,
-                        onValueChange = { note = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        label = { Text("Catatan") },
-                        singleLine = true
-                    )
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Surface(
-                        onClick = onClose,
-                        shape = CircleShape,
-                        color = Card2,
-                        modifier = Modifier.weight(1f).height(52.dp)
-                    ) {
-                        Box(Modifier.fillMaxSize(), Alignment.Center) {
-                            Text("Batal", color = Muted, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                    Surface(
-                        onClick = {
-                            val a = amt.toLongOrNull() ?: 0L
-                            if (a > 0) onSave(Tx(t?.id ?: System.currentTimeMillis(), date, inc, cat, a, note.trim()))
-                        },
-                        shape = CircleShape,
-                        color = Blue,
-                        modifier = Modifier.weight(1.4f).height(52.dp)
-                    ) {
-                        Box(Modifier.fillMaxSize(), Alignment.Center) {
-                            Text("Simpan", color = White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                        }
-                    }
+            }
+            Surface(
+                onClick = {
+                    val a = amt.toLongOrNull() ?: 0L
+                    if (a > 0) onSave(Tx(t?.id ?: System.currentTimeMillis(), date, inc, cat, a, note.trim()))
+                },
+                shape = CircleShape,
+                color = Blue,
+                modifier = Modifier.weight(1.4f).height(52.dp)
+            ) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) {
+                    Text("Simpan", color = White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                 }
             }
         }
