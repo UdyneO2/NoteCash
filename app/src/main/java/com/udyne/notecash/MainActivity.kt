@@ -36,11 +36,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Backspace
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -91,8 +93,11 @@ import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -337,6 +342,146 @@ fun AnimatedBar(fraction: Float, trackColor: Color = Card2, fillColor: Color = B
     val shape = if (rounded) CircleShape else RoundedCornerShape(10.dp)
     Box(Modifier.fillMaxWidth().height(height).clip(shape).background(trackColor)) {
         Box(Modifier.fillMaxHeight().fillMaxWidth(animFrac).background(fillColor))
+    }
+}
+
+/** Keyboard angka cepat khusus input nominal (Rp) */
+@Composable
+fun NominalKeypad(
+    value: String,
+    onChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    fun appendDigits(add: String) {
+        val next = (value + add).trimStart('0')
+        if (next.length <= 14) onChange(next)
+    }
+
+    val rows = listOf(
+        listOf("1", "2", "3"),
+        listOf("4", "5", "6"),
+        listOf("7", "8", "9"),
+        listOf("000", "0", "DEL")
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(BG)
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (value.isEmpty()) "Nominal: Rp0" else "Nominal: ${rp(value.toLongOrNull() ?: 0L)}",
+                color = Lime,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (value.isNotEmpty()) {
+                Text(
+                    text = "Bersihkan",
+                    color = Red,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable { onChange("") }.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+        rows.forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { key ->
+                    val isDel = key == "DEL"
+                    Surface(
+                        onClick = {
+                            if (isDel) {
+                                if (value.isNotEmpty()) onChange(value.dropLast(1))
+                            } else {
+                                appendDigits(key)
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isDel) Card2 else CardC,
+                        modifier = Modifier.weight(1f).height(42.dp)
+                    ) {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            if (isDel) {
+                                Icon(Icons.AutoMirrored.Rounded.Backspace, "Hapus digit", tint = White, modifier = Modifier.size(18.dp))
+                            } else {
+                                Text(key, color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Pemilih tanggal kalender Material 3 */
+@Composable
+fun CalendarDatePicker(
+    date: String,
+    label: String = "Tanggal",
+    onDateSelected: (String) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    val parsedDate = remember(date) { runCatching { LocalDate.parse(date) }.getOrDefault(LocalDate.now()) }
+    val initialMillis = remember(parsedDate) {
+        parsedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+
+    Surface(
+        onClick = { open = true },
+        shape = RoundedCornerShape(16.dp),
+        color = Card2,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(label, color = Muted, fontSize = 11.sp)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = formatIdDate(parsedDate.toString(), "EEEE, d MMMM yyyy") + " (${parsedDate})",
+                    color = White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            Icon(Icons.Rounded.CalendarMonth, "Pilih tanggal", tint = Lime, modifier = Modifier.size(22.dp))
+        }
+    }
+
+    if (open) {
+        DatePickerDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val picked = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                            onDateSelected(picked.toString())
+                        }
+                        open = false
+                    }
+                ) { Text("Pilih", color = Blue) }
+            },
+            dismissButton = {
+                TextButton(onClick = { open = false }) { Text("Batal", color = Muted) }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
     }
 }
 
@@ -956,26 +1101,65 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
     var title by remember { mutableStateOf(goal?.title ?: "") }
     var target by remember { mutableStateOf(goal?.target?.toString() ?: "") }
     var saved by remember { mutableStateOf(goal?.saved?.toString() ?: "0") }
-    var deadline by remember { mutableStateOf(goal?.deadline ?: LocalDate.now().plusMonths(3).toString()) }
+    var deadline by remember { mutableStateOf(goal?.deadline?.ifBlank { null } ?: LocalDate.now().plusMonths(3).toString()) }
+    var activeNominalField by remember { mutableStateOf(0) } // 0 = target, 1 = saved
 
     AlertDialog(
         onDismissRequest = onClose,
         shape = RoundedCornerShape(28.dp),
+        containerColor = CardC,
         title = { Text(if (goal == null) "Target baru" else "Ubah target", color = White) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Nama target") }, singleLine = true)
-                OutlinedTextField(target, { target = it.filter(Char::isDigit) }, label = { Text("Nominal target (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                OutlinedTextField(saved, { saved = it.filter(Char::isDigit) }, label = { Text("Sudah terkumpul (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                OutlinedTextField(deadline, { deadline = it }, label = { Text("Batas waktu (yyyy-MM-dd)") }, singleLine = true)
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    label = { Text("Nama target") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = { target = it.filter(Char::isDigit) },
+                    modifier = Modifier.fillMaxWidth().clickable { activeNominalField = 0 },
+                    shape = RoundedCornerShape(16.dp),
+                    label = { Text("Nominal target (Rp)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = saved,
+                    onValueChange = { saved = it.filter(Char::isDigit) },
+                    modifier = Modifier.fillMaxWidth().clickable { activeNominalField = 1 },
+                    shape = RoundedCornerShape(16.dp),
+                    label = { Text("Sudah terkumpul (Rp)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(activeNominalField == 0, { activeNominalField = 0 }, { Text("Keypad: Target") })
+                    FilterChip(activeNominalField == 1, { activeNominalField = 1 }, { Text("Keypad: Terkumpul") })
+                }
+                NominalKeypad(
+                    value = if (activeNominalField == 0) target else saved,
+                    onChange = { v -> if (activeNominalField == 0) target = v else saved = v }
+                )
+                CalendarDatePicker(
+                    date = deadline,
+                    label = "Batas waktu target",
+                    onDateSelected = { deadline = it }
+                )
             }
         },
         confirmButton = {
             TextButton({
                 val tg = target.toLongOrNull() ?: 0L
                 val sv = saved.toLongOrNull() ?: 0L
-                val dl = runCatching { LocalDate.parse(deadline).toString() }.getOrDefault(deadline.trim())
-                if (title.isNotBlank() && tg > 0) onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, dl))
+                if (title.isNotBlank() && tg > 0) onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, deadline))
             }) { Text("Simpan", color = Blue) }
         },
         dismissButton = {
@@ -993,11 +1177,24 @@ fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = onClose,
         shape = RoundedCornerShape(28.dp),
+        containerColor = CardC,
         title = { Text("Tambah ke ${goal.title}", color = White) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Text("Terkumpul saat ini: " + rp(goal.saved) + " / " + rp(goal.target), color = Muted, fontSize = 13.sp)
-                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Nominal tambahan (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it.filter(Char::isDigit) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    label = { Text("Nominal tambahan (Rp)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                NominalKeypad(value = amount, onChange = { amount = it })
             }
         },
         confirmButton = {
@@ -1135,6 +1332,7 @@ fun AvatarPopupDialog(user: String, currentType: Int, onSelect: (Int) -> Unit, o
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(28.dp),
+        containerColor = CardC,
         title = { Text("Setup Avatar", color = White) },
         text = {
             FlowRow(
@@ -1213,7 +1411,7 @@ fun SettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Setup Avatar", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(2.dp))
-                    Text("Gaya saat ini: ${AVATARS[avatarType]} · Ketuk untuk membuka popup", color = Muted, fontSize = 13.sp)
+                    Text("Ketuk untuk membuka pilihan avatar", color = Muted, fontSize = 13.sp)
                 }
                 Pill(AVATARS[avatarType], Card2, Lime)
             }
@@ -1238,7 +1436,7 @@ fun SettingsScreen(
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
         Text(
-            "NoteCash v1.2", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+            "NoteCash v1.3", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clickable { taps++; if (taps >= 7 && !dev) { taps = 0; onDev(true) } }.padding(16.dp)
         )
     }
@@ -1258,29 +1456,51 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
     var inc by remember { mutableStateOf(t?.income ?: initialIncome) }
     var cat by remember { mutableStateOf(t?.c ?: (if (initialIncome) IN[0] else OUT[0])) }
     var amt by remember { mutableStateOf(t?.a?.toString() ?: "") }
-    var date by remember { mutableStateOf(t?.d ?: LocalDate.now().toString()) }
+    var date by remember { mutableStateOf(t?.d?.ifBlank { null } ?: LocalDate.now().toString()) }
     var note by remember { mutableStateOf(t?.n ?: "") }
+
     AlertDialog(
         onDismissRequest = onClose,
         shape = RoundedCornerShape(28.dp),
+        containerColor = CardC,
         title = { Text(if (t == null) "Catat transaksi" else "Ubah transaksi", color = White) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(!inc, { inc = false; cat = OUT[0] }, { Text("Pengeluaran") })
                     FilterChip(inc, { inc = true; cat = IN[0] }, { Text("Pemasukan") })
                 }
-                OutlinedTextField(amt, { amt = it.filter(Char::isDigit) }, label = { Text("Jumlah (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { (if (inc) IN else OUT).forEach { FilterChip(cat == it, { cat = it }, { Text(it) }) } }
-                OutlinedTextField(date, { date = it }, label = { Text("Tanggal (yyyy-MM-dd)") }, singleLine = true)
-                OutlinedTextField(note, { note = it }, label = { Text("Catatan") }, singleLine = true)
+                OutlinedTextField(
+                    value = amt,
+                    onValueChange = { amt = it.filter(Char::isDigit) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    label = { Text("Jumlah (Rp)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                NominalKeypad(value = amt, onChange = { amt = it })
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (if (inc) IN else OUT).forEach { FilterChip(cat == it, { cat = it }, { Text(it) }) }
+                }
+                CalendarDatePicker(date = date, label = "Tanggal transaksi", onDateSelected = { date = it })
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    label = { Text("Catatan") },
+                    singleLine = true
+                )
             }
         },
         confirmButton = {
             TextButton({
                 val a = amt.toLongOrNull() ?: 0L
-                val d = runCatching { LocalDate.parse(date).toString() }.getOrNull()
-                if (a > 0 && d != null) onSave(Tx(t?.id ?: System.currentTimeMillis(), d, inc, cat, a, note.trim()))
+                if (a > 0) onSave(Tx(t?.id ?: System.currentTimeMillis(), date, inc, cat, a, note.trim()))
             }) { Text("Simpan", color = Blue) }
         },
         dismissButton = {
