@@ -83,6 +83,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -124,7 +126,7 @@ fun Typography.withFont(f: FontFamily) = Typography(
 
 const val DEFAULT_SHEET_URL = "https://s.id/notecash"
 val USER_RE = Regex("^[a-z0-9_]{2,30}$")
-val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya")
+val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya","Target")
 val IN = listOf("Gaji", "Bonus", "Usaha", "Hadiah", "Lainnya")
 val AVATARS = listOf("Inisial", "Laki-laki", "Perempuan", "Kacamata", "Anak")
 val ID = Locale("id", "ID")
@@ -140,9 +142,9 @@ fun within(all: List<Tx>, from: LocalDate, to: LocalDate) = all.filter { it.d >=
 fun scoreOf(s: Sum): Int = if (s.inc <= 0) 0 else ((s.inc - s.exp) * 100 / s.inc).coerceIn(0L, 100L).toInt()
 fun scoreLabel(sc: Int, has: Boolean) = when {
     !has -> "Belum ada data"
-    sc >= 60 -> "Sangat baik"
-    sc >= 30 -> "Baik"
-    sc >= 10 -> "Cukup"
+    sc >= 80 -> "Sangat baik"
+    sc >= 50 -> "Baik"
+    sc >= 25 -> "Cukup"
     else -> "Perlu dijaga"
 }
 
@@ -302,7 +304,7 @@ class MainActivity : ComponentActivity() {
                     var user by remember { mutableStateOf(st.user) }
                     AnimatedContent(
                         targetState = user,
-                        transitionSpec = { fadeIn(tween(240)) togetherWith fadeOut(tween(180)) },
+                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(240)) },
                         label = "auth_transition"
                     ) { current ->
                         if (current == null) {
@@ -367,10 +369,10 @@ fun NominalKeypad(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(BG)
-            .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Row(
             Modifier.fillMaxWidth(),
@@ -380,7 +382,7 @@ fun NominalKeypad(
             Text(
                 text = if (value.isEmpty()) "Nominal: Rp0" else "Nominal: ${rp(value.toLongOrNull() ?: 0L)}",
                 color = Lime,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold
             )
             if (value.isNotEmpty()) {
@@ -394,7 +396,7 @@ fun NominalKeypad(
             }
         }
         rows.forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { key ->
                     val isDel = key == "DEL"
                     Surface(
@@ -405,15 +407,15 @@ fun NominalKeypad(
                                 appendDigits(key)
                             }
                         },
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = if (isDel) Card2 else CardC,
-                        modifier = Modifier.weight(1f).height(42.dp)
+                        modifier = Modifier.weight(1f).height(48.dp)
                     ) {
                         Box(Modifier.fillMaxSize(), Alignment.Center) {
                             if (isDel) {
-                                Icon(Icons.AutoMirrored.Rounded.Backspace, "Hapus digit", tint = White, modifier = Modifier.size(18.dp))
+                                Icon(Icons.AutoMirrored.Rounded.Backspace, "Hapus digit", tint = White, modifier = Modifier.size(19.dp))
                             } else {
-                                Text(key, color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                Text(key, color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
@@ -452,7 +454,7 @@ fun CalendarDatePicker(
                 Text(label, color = Muted, fontSize = 11.sp)
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = formatIdDate(parsedDate.toString(), "EEEE, d MMMM yyyy") + " (${parsedDate})",
+                    text = formatIdDate(parsedDate.toString(), "EEEE, d MMMM yyyy") + " ($parsedDate)",
                     color = White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
@@ -641,7 +643,7 @@ fun TxRow(t: Tx, showDate: Boolean = false, onClick: () -> Unit) {
                 Text(t.c, color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Text(sub, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text((if (t.income) "+" else "-") + rp(t.a), color = if (t.income) Green else White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text((if (t.income) "+ " else "- ") + rp(t.a), color = if (t.income) Green else White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -651,7 +653,7 @@ fun NavItem(sel: Boolean, icon: ImageVector, label: String, onClick: () -> Unit)
     Surface(onClick = onClick, shape = CircleShape, color = if (sel) BG else Card2) {
         Row(Modifier.height(44.dp).padding(horizontal = if (sel) 12.dp else 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             Icon(icon, label, tint = if (sel) White else Muted, modifier = Modifier.size(19.dp))
-            AnimatedVisibility(visible = sel, enter = fadeIn(tween(150)), exit = fadeOut(tween(120))) {
+            AnimatedVisibility(visible = sel, enter = fadeIn(tween(150)), exit = fadeOut(tween(200))) {
                 Text(label, color = White, fontWeight = FontWeight.Medium, fontSize = 12.sp, maxLines = 1)
             }
         }
@@ -726,18 +728,18 @@ fun LoginScreen(last: String, onLogin: (String) -> Unit) {
         Box(Modifier.size(72.dp).clip(RoundedCornerShape(22.dp)).background(Lime), Alignment.Center) {
             Text("NC", color = BG, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         }
-        Text("NoteCash", fontSize = 36.sp, fontWeight = FontWeight.SemiBold, color = White, letterSpacing = (-0.5).sp, modifier = Modifier.padding(top = 16.dp))
+        Text("Note Cash", fontSize = 36.sp, fontWeight = FontWeight.SemiBold, color = White, letterSpacing = (-0.5).sp, modifier = Modifier.padding(top = 16.dp))
         Text("Masukkan username untuk membuka catatanmu", color = Muted, modifier = Modifier.padding(top = 6.dp, bottom = 28.dp))
         OutlinedTextField(
             name, { name = it; err = false }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp), isError = err,
             label = { Text("Username") },
-            supportingText = { Text(if (err) "2-30 karakter: huruf kecil, angka, atau _" else "Otomatis tersinkron ke Google Sheets") },
+            supportingText = { Text(if (err) "2-30 karakter: huruf kecil, angka, atau _" else "") },
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { go() })
         )
         Spacer(Modifier.height(16.dp))
         Surface(onClick = { go() }, shape = CircleShape, color = Blue, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-            Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Masuk", color = White, fontWeight = FontWeight.Medium, fontSize = 16.sp) }
+            Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Masuk", color = White, fontWeight = FontWeight.Medium, fontSize = 15.sp) }
         }
     }
 }
@@ -806,36 +808,38 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
             targetState = tab,
             transitionSpec = {
                 val dir = if (targetState > initialState) 1 else -1
-                (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { it / 14 * dir }) togetherWith
-                    (fadeOut(tween(160)) + slideOutHorizontally(tween(180)) { -it / 18 * dir })
+                (fadeIn(tween(200)) + slideInHorizontally(tween(220)) { it / 16 * dir }) togetherWith
+                    (fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { -it / 18 * dir })
             },
             label = "tab_transition"
         ) { activeTab ->
-            when (activeTab) {
-                0 -> HomeScreen(
-                    user = user, avatarType = avatarType, syncing = syncing, all = all,
-                    anchor = homeA, onAnchor = { homeA = it }, hide = hide, onHide = { hide = !hide },
-                    onSync = { autoPull(silent = false) }, onSearch = { searching = true },
-                    onAdd = { inc -> edit = null; formIncome = inc; showForm = true },
-                    onEdit = { edit = it; showForm = true }
-                )
-                1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }) { edit = it; showForm = true }
-                2 -> TargetScreen(
-                    goals = goals, syncing = syncing,
-                    onSaveGoal = { g ->
-                        val exists = goals.any { it.id == g.id }
-                        commitGoals(if (exists) goals.map { if (it.id == g.id) g else it } else goals + g)
-                    },
-                    onDeleteGoal = { id -> commitGoals(goals.filter { it.id != id }) }
-                )
-                else -> SettingsScreen(
-                    user = user, avatarType = avatarType,
-                    onAvatarChange = { avatarType = it; st.setAvatar(user, it) },
-                    syncing = syncing, url = url, dev = dev,
-                    onUrl = { st.url = it.trim(); url = st.url },
-                    onDev = { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } },
-                    onLogout = onLogout
-                )
+            key(activeTab) {
+                when (activeTab) {
+                    0 -> HomeScreen(
+                        user = user, avatarType = avatarType, syncing = syncing, all = all,
+                        anchor = homeA, onAnchor = { homeA = it }, hide = hide, onHide = { hide = !hide },
+                        onSync = { autoPull(silent = false) }, onSearch = { searching = true },
+                        onAdd = { inc -> edit = null; formIncome = inc; showForm = true },
+                        onEdit = { edit = it; showForm = true }
+                    )
+                    1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }) { edit = it; showForm = true }
+                    2 -> TargetScreen(
+                        goals = goals, syncing = syncing,
+                        onSaveGoal = { g ->
+                            val exists = goals.any { it.id == g.id }
+                            commitGoals(if (exists) goals.map { if (it.id == g.id) g else it } else goals + g)
+                        },
+                        onDeleteGoal = { id -> commitGoals(goals.filter { it.id != id }) }
+                    )
+                    else -> SettingsScreen(
+                        user = user, avatarType = avatarType,
+                        onAvatarChange = { avatarType = it; st.setAvatar(user, it) },
+                        syncing = syncing, url = url, dev = dev,
+                        onUrl = { st.url = it.trim(); url = st.url },
+                        onDev = { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } },
+                        onLogout = onLogout
+                    )
+                }
             }
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
@@ -843,7 +847,7 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
         AnimatedVisibility(
             visible = searching,
             enter = fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 6 },
-            exit = fadeOut(tween(150)) + slideOutHorizontally(tween(180)) { it / 6 }
+            exit = fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { it / 6 }
         ) {
             SearchScreen(all, { searching = false }) { edit = it; showForm = true }
         }
@@ -883,7 +887,7 @@ fun HomeScreen(
                     Text(greet, color = Muted, fontSize = 13.sp)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(user, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut()) {
+                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
                             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Lime)
                         }
                     }
@@ -913,7 +917,7 @@ fun HomeScreen(
                             Box(Modifier.size(22.dp).clip(CircleShape).background(if (net >= 0) Green else Red), Alignment.Center) {
                                 Icon(if (net >= 0) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward, null, tint = White, modifier = Modifier.size(14.dp))
                             }
-                            Text(if (net >= 0) "Surplus " + rp(net) + " bulan ini" else "Defisit " + rp(-net) + " bulan ini", color = Muted, fontSize = 13.sp)
+                            Text(if (net >= 0) "Plus " + rp(net) + " bulan ini" else "Minus " + rp(-net) + " bulan ini", color = Muted, fontSize = 13.sp)
                         }
                     }
                 }
@@ -936,7 +940,7 @@ fun HomeScreen(
             Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = Blue) {
                 Row(Modifier.padding(20.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Column {
-                        Text("Skor keuangan", color = White.copy(alpha = 0.85f), fontSize = 13.sp)
+                        Text("Skor", color = White.copy(alpha = 0.85f), fontSize = 13.sp)
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text("$sc", color = White, fontSize = 44.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
                             Text("%", color = White.copy(alpha = 0.7f), fontSize = 22.sp, modifier = Modifier.padding(bottom = 8.dp, start = 2.dp))
@@ -1007,7 +1011,7 @@ fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Target", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-                    AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut()) {
+                    AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
                     }
                 }
@@ -1102,7 +1106,7 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
     var target by remember { mutableStateOf(goal?.target?.toString() ?: "") }
     var saved by remember { mutableStateOf(goal?.saved?.toString() ?: "0") }
     var deadline by remember { mutableStateOf(goal?.deadline?.ifBlank { null } ?: LocalDate.now().plusMonths(3).toString()) }
-    var activeNominalField by remember { mutableStateOf(0) } // 0 = target, 1 = saved
+    var activeNominalField by remember { mutableStateOf(0) }
 
     AlertDialog(
         onDismissRequest = onClose,
@@ -1239,7 +1243,7 @@ fun SearchScreen(all: List<Tx>, onClose: () -> Unit, onEdit: (Tx) -> Unit) {
             listOf("Semua", "Pemasukan", "Pengeluaran").forEachIndexed { i, t -> FilterChip(type == i, { type = i }, { Text(t) }) }
         }
         Text(res.size.toString() + " hasil  ·  selisih " + rp(s.inc - s.exp), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (res.isEmpty()) item { Text(if (all.isEmpty()) "Belum ada transaksi." else "Tidak ada transaksi yang cocok.", color = Muted, fontSize = 14.sp) }
             items(res, key = { it.id }) { t -> TxRow(t, showDate = true) { onEdit(t) } }
         }
@@ -1268,7 +1272,7 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
     val dX = s.exp - sp.exp
 
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)) {
-        item { Text("Cashflow", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp) }
+        item { Text("Laporan", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp) }
         item {
             Panel {
                 Segmented(listOf("Minggu", "Bulan", "Tahun"), mode, onMode)
@@ -1333,7 +1337,7 @@ fun AvatarPopupDialog(user: String, currentType: Int, onSelect: (Int) -> Unit, o
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(28.dp),
         containerColor = CardC,
-        title = { Text("Setup Avatar", color = White) },
+        title = { Text("Pilih Avatar", color = White) },
         text = {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1383,7 +1387,7 @@ fun SettingsScreen(
         Text("Settings", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.clickable { showAvatarPopup = true }) {
+                Box(Modifier.clip(CircleShape).clickable { showAvatarPopup = true }) {
                     Avatar(user, 64.dp, Blue, type = avatarType)
                     Box(
                         Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(Lime),
@@ -1399,21 +1403,11 @@ fun SettingsScreen(
                             if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync otomatis aktif · tab \"$user\"",
                             color = if (syncing) Lime else Muted, fontSize = 13.sp
                         )
-                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut()) {
+                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
                             CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Lime)
                         }
                     }
                 }
-            }
-        }
-        Panel(modifier = Modifier.clickable { showAvatarPopup = true }) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.weight(1f)) {
-                    Text("Setup Avatar", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(2.dp))
-                    Text("Ketuk untuk membuka pilihan avatar", color = Muted, fontSize = 13.sp)
-                }
-                Pill(AVATARS[avatarType], Card2, Lime)
             }
         }
         if (dev) Panel {
@@ -1428,7 +1422,7 @@ fun SettingsScreen(
                     Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Setel ulang", color = White, fontWeight = FontWeight.Medium) }
                 }
                 Surface(onClick = { onDev(false) }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Matikan mode", color = White, fontWeight = FontWeight.Medium) }
+                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Close", color = White, fontWeight = FontWeight.Medium) }
                 }
             }
         }
@@ -1436,7 +1430,7 @@ fun SettingsScreen(
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
         Text(
-            "NoteCash v1.3", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+            "Note Cash v1.2", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clickable { taps++; if (taps >= 7 && !dev) { taps = 0; onDev(true) } }.padding(16.dp)
         )
     }
@@ -1459,55 +1453,117 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
     var date by remember { mutableStateOf(t?.d?.ifBlank { null } ?: LocalDate.now().toString()) }
     var note by remember { mutableStateOf(t?.n ?: "") }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onClose,
-        shape = RoundedCornerShape(28.dp),
-        containerColor = CardC,
-        title = { Text(if (t == null) "Catat transaksi" else "Ubah transaksi", color = White) },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = BG
+        ) {
             Column(
-                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(!inc, { inc = false; cat = OUT[0] }, { Text("Pengeluaran") })
-                    FilterChip(inc, { inc = true; cat = IN[0] }, { Text("Pemasukan") })
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Surface(onClick = onClose, shape = CircleShape, color = Card2) {
+                            Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
+                        }
+                        Text(
+                            if (t == null) "Catat transaksi" else "Ubah transaksi",
+                            color = White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    if (onDel != null) {
+                        IconButton(onClick = onDel) {
+                            Icon(Icons.Rounded.Delete, "Hapus", tint = Red)
+                        }
+                    }
                 }
-                OutlinedTextField(
-                    value = amt,
-                    onValueChange = { amt = it.filter(Char::isDigit) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text("Jumlah (Rp)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
-                NominalKeypad(value = amt, onChange = { amt = it })
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (if (inc) IN else OUT).forEach { FilterChip(cat == it, { cat = it }, { Text(it) }) }
+
+                Spacer(Modifier.height(12.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(!inc, { inc = false; cat = OUT[0] }, { Text("Pengeluaran") })
+                        FilterChip(inc, { inc = true; cat = IN[0] }, { Text("Pemasukan") })
+                    }
+
+                    OutlinedTextField(
+                        value = amt,
+                        onValueChange = { amt = it.filter(Char::isDigit) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        label = { Text("Jumlah (Rp)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+
+                    NominalKeypad(value = amt, onChange = { amt = it })
+
+                    Text("Kategori", color = Muted, fontSize = 13.sp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        (if (inc) IN else OUT).forEach {
+                            FilterChip(cat == it, { cat = it }, { Text(it) })
+                        }
+                    }
+
+                    CalendarDatePicker(date = date, label = "Tanggal transaksi", onDateSelected = { date = it })
+
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(18.dp),
+                        label = { Text("Catatan") },
+                        singleLine = true
+                    )
                 }
-                CalendarDatePicker(date = date, label = "Tanggal transaksi", onDateSelected = { date = it })
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text("Catatan") },
-                    singleLine = true
-                )
-            }
-        },
-        confirmButton = {
-            TextButton({
-                val a = amt.toLongOrNull() ?: 0L
-                if (a > 0) onSave(Tx(t?.id ?: System.currentTimeMillis(), date, inc, cat, a, note.trim()))
-            }) { Text("Simpan", color = Blue) }
-        },
-        dismissButton = {
-            Row {
-                if (onDel != null) IconButton(onDel) { Icon(Icons.Rounded.Delete, "Hapus", tint = Red) }
-                TextButton(onClose) { Text("Batal", color = Muted) }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(
+                        onClick = onClose,
+                        shape = CircleShape,
+                        color = Card2,
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            Text("Batal", color = Muted, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    Surface(
+                        onClick = {
+                            val a = amt.toLongOrNull() ?: 0L
+                            if (a > 0) onSave(Tx(t?.id ?: System.currentTimeMillis(), date, inc, cat, a, note.trim()))
+                        },
+                        shape = CircleShape,
+                        color = Blue,
+                        modifier = Modifier.weight(1.4f).height(52.dp)
+                    ) {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            Text("Simpan", color = White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        }
+                    }
+                }
             }
         }
-    )
+    }
 }
