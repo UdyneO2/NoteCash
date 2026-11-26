@@ -184,11 +184,11 @@ class Store(ctx: Context) {
         get() = p.getString("user", null)
         set(v) { p.edit().putString("user", v).apply() }
 
-    fun avatarOf(u: String): Int = p.getInt("av_$u", 0).coerceIn(0, AVATARS.lastIndex)
-    fun setAvatar(u: String, idx: Int) { p.edit().putInt("av_$u", idx.coerceIn(0, AVATARS.lastIndex)).apply() }
+    fun avatarOf(u: String): Int = p.getInt("av_" + u, 0).coerceIn(0, AVATARS.lastIndex)
+    fun setAvatar(u: String, idx: Int) { p.edit().putInt("av_" + u, idx.coerceIn(0, AVATARS.lastIndex)).apply() }
 
     fun load(u: String): List<Tx> = runCatching {
-        val j = JSONArray(p.getString("tx_$u", "[]"))
+        val j = JSONArray(p.getString("tx_" + u, "[]"))
         (0 until j.length()).map {
             val o = j.getJSONObject(it)
             Tx(o.getLong("id"), o.getString("d"), o.getBoolean("i"), o.getString("c"), o.getLong("a"), o.optString("n"))
@@ -198,11 +198,11 @@ class Store(ctx: Context) {
     fun save(u: String, l: List<Tx>) {
         val j = JSONArray()
         l.forEach { j.put(JSONObject().put("id", it.id).put("d", it.d).put("i", it.income).put("c", it.c).put("a", it.a).put("n", it.n)) }
-        p.edit().putString("tx_$u", j.toString()).apply()
+        p.edit().putString("tx_" + u, j.toString()).apply()
     }
 
     fun loadGoals(u: String): List<Goal> = runCatching {
-        val j = JSONArray(p.getString("goal_$u", "[]"))
+        val j = JSONArray(p.getString("goal_" + u, "[]"))
         (0 until j.length()).map {
             val o = j.getJSONObject(it)
             Goal(o.getLong("id"), o.getString("t"), o.getLong("tg"), o.getLong("sv"), o.optString("dl"))
@@ -212,7 +212,7 @@ class Store(ctx: Context) {
     fun saveGoals(u: String, l: List<Goal>) {
         val j = JSONArray()
         l.forEach { j.put(JSONObject().put("id", it.id).put("t", it.title).put("tg", it.target).put("sv", it.saved).put("dl", it.deadline)) }
-        p.edit().putString("goal_$u", j.toString()).apply()
+        p.edit().putString("goal_" + u, j.toString()).apply()
     }
 }
 
@@ -380,7 +380,7 @@ fun NominalKeypad(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = if (value.isEmpty()) "Nominal: Rp0" else "Nominal: ${rp(value.toLongOrNull() ?: 0L)}",
+                text = if (value.isEmpty()) "Nominal: Rp0" else "Nominal: " + rp(value.toLongOrNull() ?: 0L),
                 color = Lime,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold
@@ -454,7 +454,7 @@ fun CalendarDatePicker(
                 Text(label, color = Muted, fontSize = 11.sp)
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = formatIdDate(parsedDate.toString(), "EEEE, d MMMM yyyy") + " ($parsedDate)",
+                    text = formatIdDate(parsedDate.toString(), "EEEE, d MMMM yyyy") + " (" + parsedDate + ")",
                     color = White,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium
@@ -954,7 +954,7 @@ fun HomeScreen(
                     Column {
                         Text("Skor", color = White.copy(alpha = 0.85f), fontSize = 13.sp)
                         Row(verticalAlignment = Alignment.Bottom) {
-                            Text("$sc", color = White, fontSize = 44.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
+                            Text(sc.toString(), color = White, fontSize = 44.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
                             Text("%", color = White.copy(alpha = 0.7f), fontSize = 22.sp, modifier = Modifier.padding(bottom = 8.dp, start = 2.dp))
                         }
                         Spacer(Modifier.height(6.dp))
@@ -998,7 +998,7 @@ fun HomeScreen(
         item { Text("Transaksi", color = White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp)) }
         if (list.isEmpty()) item { Text("Belum ada transaksi bulan ini. Ketuk tombol hijau untuk mencatat.", color = Muted, fontSize = 14.sp) }
         list.groupBy { it.d }.forEach { (d, l) ->
-            item(key = "h$d") { Text(formatIdDate(d), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
+            item(key = "h" + d) { Text(formatIdDate(d), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
             l.forEach { t -> item(key = t.id) { TxRow(t) { onEdit(t) } } }
         }
     }
@@ -1045,13 +1045,13 @@ fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit
                             Text("Total terkumpul", color = Muted, fontSize = 13.sp)
                             Money(totalSaved, 28.sp)
                         }
-                        Pill("$overallPct%", Blue, White)
+                        Pill(overallPct.toString() + "%", Blue, White)
                     }
                     Spacer(Modifier.height(14.dp))
                     AnimatedBar(fraction = if (totalTarget > 0) totalSaved.toFloat() / totalTarget else 0f, fillColor = Lime)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        if (totalTarget > 0) "Dari total target " + rp(totalTarget) + " (${goals.size} target)" else "Belum ada target tabungan yang dibuat",
+                        if (totalTarget > 0) "Dari total target " + rp(totalTarget) + " (" + goals.size + " target)" else "Belum ada target tabungan yang dibuat",
                         color = Muted, fontSize = 12.sp
                     )
                 }
@@ -1072,9 +1072,9 @@ fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.weight(1f)) {
                             Text(g.title, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                            if (g.deadline.isNotBlank()) Text("Batas waktu: ${g.deadline}", color = Muted, fontSize = 12.sp)
+                            if (g.deadline.isNotBlank()) Text("Batas waktu: " + g.deadline, color = Muted, fontSize = 12.sp)
                         }
-                        Pill(if (done) "Tercapai" else "$pct%", if (done) Green else Card2, if (done) BG else White)
+                        Pill(if (done) "Tercapai" else pct.toString() + "%", if (done) Green else Card2, if (done) BG else White)
                     }
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1254,7 +1254,7 @@ fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
             Surface(onClick = onClose, shape = CircleShape, color = Card2) {
                 Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
             }
-            Text("Tambah ke ${goal.title}", color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("Tambah ke " + goal.title, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -1487,9 +1487,15 @@ fun SettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text(user, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val syncStatusText = if (syncing) {
+                            "Menyinkronkan ke tab '" + user + "'..."
+                        } else {
+                            "Sync otomatis aktif · tab '" + user + "'"
+                        }
                         Text(
-                            if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync aktif"",
-                            color = if (syncing) Lime else Muted, fontSize = 13.sp
+                            text = syncStatusText,
+                            color = if (syncing) Lime else Muted,
+                            fontSize = 13.sp
                         )
                         AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut(tween(220))) {
                             CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Lime)
@@ -1503,7 +1509,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(u, { u = it; onUrl(it) }, Modifier.fillMaxWidth(), label = { Text("URL Apps Script atau shortlink") })
             Spacer(Modifier.height(8.dp))
-            Text("Bawaan: $DEFAULT_SHEET_URL", color = Muted, fontSize = 12.sp)
+            Text("Bawaan: " + DEFAULT_SHEET_URL, color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Surface(onClick = { u = DEFAULT_SHEET_URL; onUrl("") }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
