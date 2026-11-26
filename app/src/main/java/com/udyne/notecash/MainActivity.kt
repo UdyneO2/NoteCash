@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,30 +20,30 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ShoppingCart
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -50,6 +51,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,6 +59,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,13 +75,13 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /* ---------- Palet (mengikuti desain Orbix: gelap, biru, lime) ---------- */
@@ -91,7 +95,6 @@ val Red = Color(0xFFFF4D4F)
 val Muted = Color(0xFF9AA1B2)
 val White = Color(0xFFFFFFFF)
 
-/** Ganti satu baris ini kalau punya file SF Pro (res/font) -> FontFamily(Font(R.font.sf_pro)). */
 val AppFont: FontFamily = FontFamily.SansSerif
 
 fun Typography.withFont(f: FontFamily) = Typography(
@@ -106,9 +109,12 @@ const val DEFAULT_SHEET_URL = "https://s.id/notecash"
 val USER_RE = Regex("^[a-z0-9_]{2,30}$")
 val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya")
 val IN = listOf("Gaji", "Bonus", "Usaha", "Hadiah", "Lainnya")
+val AVATARS = listOf("Inisial", "Laki-laki", "Perempuan", "Berhijab", "Kacamata", "Anak")
 val ID = Locale("id", "ID")
 
 data class Tx(val id: Long, val d: String, val income: Boolean, val c: String, val a: Long, val n: String)
+data class Goal(val id: Long, val title: String, val target: Long, val saved: Long, val deadline: String)
+data class SyncBundle(val txs: List<Tx>, val goals: List<Goal>)
 class Sum(val inc: Long, val exp: Long)
 
 fun rp(n: Long) = (if (n < 0) "-" else "") + "Rp" + "%,d".format(ID, Math.abs(n))
@@ -155,9 +161,9 @@ class Store(ctx: Context) {
     var user: String?
         get() = p.getString("user", null)
         set(v) { p.edit().putString("user", v).apply() }
-    var chart: Boolean
-        get() = p.getBoolean("chart", false)
-        set(v) { p.edit().putBoolean("chart", v).apply() }
+
+    fun avatarOf(u: String): Int = p.getInt("av_$u", 0)
+    fun setAvatar(u: String, idx: Int) { p.edit().putInt("av_$u", idx).apply() }
 
     fun load(u: String): List<Tx> = runCatching {
         val j = JSONArray(p.getString("tx_$u", "[]"))
@@ -172,11 +178,24 @@ class Store(ctx: Context) {
         l.forEach { j.put(JSONObject().put("id", it.id).put("d", it.d).put("i", it.income).put("c", it.c).put("a", it.a).put("n", it.n)) }
         p.edit().putString("tx_$u", j.toString()).apply()
     }
+
+    fun loadGoals(u: String): List<Goal> = runCatching {
+        val j = JSONArray(p.getString("goal_$u", "[]"))
+        (0 until j.length()).map {
+            val o = j.getJSONObject(it)
+            Goal(o.getLong("id"), o.getString("t"), o.getLong("tg"), o.getLong("sv"), o.optString("dl"))
+        }
+    }.getOrDefault(emptyList())
+
+    fun saveGoals(u: String, l: List<Goal>) {
+        val j = JSONArray()
+        l.forEach { j.put(JSONObject().put("id", it.id).put("t", it.title).put("tg", it.target).put("sv", it.saved).put("dl", it.deadline)) }
+        p.edit().putString("goal_$u", j.toString()).apply()
+    }
 }
 
-/** Sinkron ke Google Sheets lewat Web App Apps Script. Satu tab per username. */
+/** Sinkron otomatis ke Google Sheets lewat Web App Apps Script. Satu tab per username. */
 object Sheet {
-    /** Ikuti shortlink (mis. s.id) sampai URL Apps Script, karena POST kehilangan body jika diredirect. */
     private fun resolve(raw: String): String {
         var cur = if (raw.trim().startsWith("http")) raw.trim() else "https://" + raw.trim()
         repeat(5) {
@@ -187,32 +206,64 @@ object Sheet {
             val code = c.responseCode
             val loc = c.getHeaderField("Location")
             c.disconnect()
-            if (code in 300..399 && loc != null) cur = URL(URL(cur), loc).toString() else return cur
+            if (code in 300..399 && loc != null) cur = URI(cur).resolve(loc).toString() else return cur
         }
         return cur
     }
 
-    fun push(url: String, user: String, l: List<Tx>) {
+    fun pushAll(url: String, user: String, txs: List<Tx>, goals: List<Goal>) {
         val rows = JSONArray()
-        l.sortedBy { it.d }.forEach {
+        txs.sortedBy { it.d }.forEach {
             rows.put(JSONArray().put(it.id.toString()).put(it.d).put(if (it.income) "Pemasukan" else "Pengeluaran").put(it.c).put(it.a).put(it.n))
         }
+        goals.forEach {
+            rows.put(JSONArray().put(it.id.toString()).put(it.deadline).put("Target").put(it.title).put(it.target).put(it.saved.toString()))
+        }
         val c = URL(resolve(url)).openConnection() as HttpURLConnection
-        c.requestMethod = "POST"; c.doOutput = true
+        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 12000; c.readTimeout = 12000
         c.setRequestProperty("Content-Type", "text/plain;charset=utf-8")
         c.outputStream.use { it.write(JSONObject().put("user", user).put("rows", rows).toString().toByteArray()) }
         c.inputStream.close(); c.disconnect()
     }
 
-    fun pull(url: String, user: String): List<Tx> {
+    fun pullAll(url: String, user: String): SyncBundle {
         val base = resolve(url)
         val sep = if (base.contains("?")) "&" else "?"
         val c = URL(base + sep + "user=" + URLEncoder.encode(user, "UTF-8")).openConnection() as HttpURLConnection
+        c.connectTimeout = 12000; c.readTimeout = 12000
         val s = c.inputStream.bufferedReader().readText(); c.disconnect()
         val j = JSONArray(s)
-        return (0 until j.length()).map { j.getJSONArray(it) }.filter { it.optString(0).isNotBlank() }.map {
-            Tx(it.optString(0).toLongOrNull() ?: System.nanoTime(), it.optString(1).take(10), it.optString(2) == "Pemasukan", it.optString(3), it.optLong(4), it.optString(5))
+        val txs = mutableListOf<Tx>()
+        val goals = mutableListOf<Goal>()
+        for (i in 0 until j.length()) {
+            val r = j.getJSONArray(i)
+            if (r.optString(0).isBlank()) continue
+            val id = r.optString(0).toLongOrNull() ?: System.nanoTime()
+            val tipe = r.optString(2)
+            if (tipe == "Target") {
+                goals.add(
+                    Goal(
+                        id = id,
+                        title = r.optString(3).ifBlank { "Target" },
+                        target = r.optLong(4),
+                        saved = r.optString(5).toLongOrNull() ?: 0L,
+                        deadline = r.optString(1).take(10)
+                    )
+                )
+            } else {
+                txs.add(
+                    Tx(
+                        id = id,
+                        d = r.optString(1).take(10),
+                        income = tipe == "Pemasukan",
+                        c = r.optString(3).ifBlank { "Lainnya" },
+                        a = r.optLong(4),
+                        n = r.optString(5)
+                    )
+                )
+            }
         }
+        return SyncBundle(txs, goals)
     }
 }
 
@@ -259,10 +310,151 @@ fun Pill(text: String, bg: Color, fg: Color) {
     }
 }
 
+/**
+ * Avatar Vector:
+ * 0 = Inisial huruf
+ * 1 = Laki-laki
+ * 2 = Perempuan
+ * 3 = Perempuan Berhijab
+ * 4 = Berkacamata
+ * 5 = Anak / Muda
+ */
 @Composable
-fun Avatar(name: String, size: Dp, bg: Color = Card2) {
+fun Avatar(name: String, size: Dp, bg: Color = Card2, type: Int = 0) {
+    val ch = name.firstOrNull()?.uppercase() ?: "?"
     Box(Modifier.size(size).clip(CircleShape).background(bg), Alignment.Center) {
-        Text(name.first().uppercase(), color = White, fontWeight = FontWeight.SemiBold, fontSize = (size.value * 0.42f).sp)
+        if (type == 0) {
+            Text(ch, color = White, fontWeight = FontWeight.SemiBold, fontSize = (size.value * 0.42f).sp)
+        } else {
+            Canvas(Modifier.fillMaxSize()) {
+                val w = this.size.width
+                val h = this.size.height
+                val cx = w / 2f
+                val skin = Color(0xFFF3C6A5)
+                val darkHair = Color(0xFF1F2430)
+                val hijabColor = Color(0xFF5C6BC0)
+                val shirtMale = Color(0xFF0A9BF0)
+                val shirtFemale = Color(0xFFEC407A)
+                val shirtKid = Color(0xFF2ED573)
+
+                // Latar aksen lembut
+                drawCircle(
+                    color = when (type) {
+                        1 -> Color(0xFF1B3A57)
+                        2 -> Color(0xFF4A2545)
+                        3 -> Color(0xFF2B2D5C)
+                        4 -> Color(0xFF1E3D3B)
+                        else -> Color(0xFF3E3A1E)
+                    },
+                    radius = w * 0.5f
+                )
+
+                // Kerudung belakang (untuk Berhijab)
+                if (type == 3) {
+                    drawCircle(hijabColor, radius = w * 0.31f, center = Offset(cx, h * 0.44f))
+                    drawRoundRect(
+                        color = hijabColor,
+                        topLeft = Offset(w * 0.20f, h * 0.42f),
+                        size = Size(w * 0.60f, h * 0.48f),
+                        cornerRadius = CornerRadius(w * 0.25f)
+                    )
+                }
+
+                // Rambut panjang belakang (untuk Perempuan)
+                if (type == 2) {
+                    drawRoundRect(
+                        color = darkHair,
+                        topLeft = Offset(w * 0.22f, h * 0.24f),
+                        size = Size(w * 0.56f, h * 0.52f),
+                        cornerRadius = CornerRadius(w * 0.24f)
+                    )
+                }
+
+                // Badan / Bahu
+                val shirt = when (type) {
+                    1, 4 -> shirtMale
+                    2 -> shirtFemale
+                    3 -> Color(0xFF7986CB)
+                    else -> shirtKid
+                }
+                drawRoundRect(
+                    color = shirt,
+                    topLeft = Offset(w * 0.18f, h * 0.68f),
+                    size = Size(w * 0.64f, h * 0.42f),
+                    cornerRadius = CornerRadius(w * 0.30f)
+                )
+
+                // Leher
+                drawRect(
+                    color = skin,
+                    topLeft = Offset(cx - w * 0.07f, h * 0.56f),
+                    size = Size(w * 0.14f, h * 0.16f)
+                )
+
+                // Kepala
+                val headR = if (type == 5) w * 0.24f else w * 0.22f
+                val headY = if (type == 5) h * 0.44f else h * 0.42f
+                drawCircle(skin, radius = headR, center = Offset(cx, headY))
+
+                // Hijab bingkai wajah (type 3)
+                if (type == 3) {
+                    drawArc(
+                        color = hijabColor,
+                        startAngle = 175f,
+                        sweepAngle = 190f,
+                        useCenter = false,
+                        topLeft = Offset(cx - headR * 1.08f, headY - headR * 1.08f),
+                        size = Size(headR * 2.16f, headR * 2.16f),
+                        style = Stroke(width = w * 0.09f, cap = StrokeCap.Round)
+                    )
+                } else {
+                    // Rambut atas (Laki-laki, Perempuan, Kacamata, Anak)
+                    drawArc(
+                        color = darkHair,
+                        startAngle = 180f,
+                        sweepAngle = 180f,
+                        useCenter = true,
+                        topLeft = Offset(cx - headR * 1.02f, headY - headR * 1.08f),
+                        size = Size(headR * 2.04f, headR * 1.35f)
+                    )
+                    if (type == 5) {
+                        // Jambul anak
+                        val tuft = Path().apply {
+                            moveTo(cx - w * 0.04f, headY - headR * 0.95f)
+                            lineTo(cx + w * 0.02f, headY - headR * 1.28f)
+                            lineTo(cx + w * 0.06f, headY - headR * 0.92f)
+                            close()
+                        }
+                        drawPath(tuft, darkHair)
+                    }
+                }
+
+                // Mata
+                val eyeY = headY + headR * 0.05f
+                val eyeOffset = headR * 0.36f
+                drawCircle(darkHair, radius = w * 0.024f, center = Offset(cx - eyeOffset, eyeY))
+                drawCircle(darkHair, radius = w * 0.024f, center = Offset(cx + eyeOffset, eyeY))
+
+                // Kacamata (type 4)
+                if (type == 4) {
+                    val lensR = headR * 0.30f
+                    drawCircle(White, radius = lensR, center = Offset(cx - eyeOffset, eyeY), style = Stroke(w * 0.024f))
+                    drawCircle(White, radius = lensR, center = Offset(cx + eyeOffset, eyeY), style = Stroke(w * 0.024f))
+                    drawLine(White, Offset(cx - eyeOffset + lensR, eyeY), Offset(cx + eyeOffset - lensR, eyeY), strokeWidth = w * 0.024f)
+                }
+
+                // Senyum
+                drawArc(
+                    color = Color(0xFF9E5A4A),
+                    startAngle = 20f,
+                    sweepAngle = 140f,
+                    useCenter = false,
+                    topLeft = Offset(cx - headR * 0.28f, headY + headR * 0.16f),
+                    size = Size(headR * 0.56f, headR * 0.34f),
+                    style = Stroke(width = w * 0.022f, cap = StrokeCap.Round)
+                )
+            }
+        }
     }
 }
 
@@ -313,7 +505,7 @@ fun TxRow(t: Tx, showDate: Boolean = false, onClick: () -> Unit) {
     val sub = if (showDate) listOf(t.d, t.n).filter { it.isNotBlank() }.joinToString(" · ") else if (t.n.isBlank()) "Tanpa catatan" else t.n
     Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = CardC, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Avatar(t.c, 42.dp)
+            Avatar(t.c, 42.dp, type = 0)
             Column(Modifier.weight(1f)) {
                 Text(t.c, color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Text(sub, color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -326,9 +518,9 @@ fun TxRow(t: Tx, showDate: Boolean = false, onClick: () -> Unit) {
 @Composable
 fun NavItem(sel: Boolean, icon: ImageVector, label: String, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = CircleShape, color = if (sel) BG else Card2) {
-        Row(Modifier.height(48.dp).padding(horizontal = if (sel) 18.dp else 13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Icon(icon, label, tint = if (sel) White else Muted)
-            if (sel) Text(label, color = White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+        Row(Modifier.height(44.dp).padding(horizontal = if (sel) 13.dp else 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(icon, label, tint = if (sel) White else Muted, modifier = Modifier.size(20.dp))
+            if (sel) Text(label, color = White, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1)
         }
     }
 }
@@ -337,13 +529,14 @@ fun NavItem(sel: Boolean, icon: ImageVector, label: String, onClick: () -> Unit)
 fun BottomBar(tab: Int, onTab: (Int) -> Unit, onAdd: () -> Unit, modifier: Modifier) {
     Box(modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp), Alignment.Center) {
         Surface(shape = CircleShape, color = Color(0xFF191D29), border = BorderStroke(1.dp, Color(0xFF262B3A)), shadowElevation = 8.dp) {
-            Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 NavItem(tab == 0, Icons.Rounded.Home, "Beranda") { onTab(0) }
                 NavItem(tab == 1, Icons.Rounded.BarChart, "Laporan") { onTab(1) }
                 Surface(onClick = onAdd, shape = CircleShape, color = Lime) {
-                    Box(Modifier.size(48.dp), Alignment.Center) { Icon(Icons.Rounded.Add, "Catat", tint = BG) }
+                    Box(Modifier.size(44.dp), Alignment.Center) { Icon(Icons.Rounded.Add, "Catat", tint = BG) }
                 }
-                NavItem(tab == 2, Icons.Rounded.Person, "Profil") { onTab(2) }
+                NavItem(tab == 2, Icons.Rounded.Flag, "Target") { onTab(2) }
+                NavItem(tab == 3, Icons.Rounded.Person, "Profil") { onTab(3) }
             }
         }
     }
@@ -405,7 +598,7 @@ fun LoginScreen(last: String, onLogin: (String) -> Unit) {
         OutlinedTextField(
             name, { name = it; err = false }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp), isError = err,
             label = { Text("Username") },
-            supportingText = { Text(if (err) "2-30 karakter: huruf kecil, angka, atau _" else "Setiap username punya tab sendiri di Google Sheets") },
+            supportingText = { Text(if (err) "2-30 karakter: huruf kecil, angka, atau _" else "Otomatis tersinkron ke Google Sheets") },
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { go() })
         )
@@ -419,55 +612,108 @@ fun LoginScreen(last: String, onLogin: (String) -> Unit) {
 @Composable
 fun Main(st: Store, user: String, onLogout: () -> Unit) {
     var all by remember(user) { mutableStateOf(st.load(user)) }
+    var goals by remember(user) { mutableStateOf(st.loadGoals(user)) }
+    var avatarType by remember(user) { mutableStateOf(st.avatarOf(user)) }
     var tab by remember { mutableStateOf(0) }
     var edit by remember { mutableStateOf<Tx?>(null) }
     var formIncome by remember { mutableStateOf(false) }
     var showForm by remember { mutableStateOf(false) }
-    var confirmPull by remember { mutableStateOf(false) }
     var hide by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
+    var syncing by remember { mutableStateOf(false) }
     var homeA by remember { mutableStateOf(LocalDate.now()) }
     var repA by remember { mutableStateOf(LocalDate.now()) }
     var repMode by remember { mutableStateOf(1) }
-    var chart by remember { mutableStateOf(st.chart) }
     var url by remember { mutableStateOf(st.url) }
     var dev by remember { mutableStateOf(st.dev) }
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
 
-    fun commit(l: List<Tx>) {
-        all = l; st.save(user, l)
-        if (url.isNotBlank()) scope.launch {
-            val r = runCatching { withContext(Dispatchers.IO) { Sheet.push(url, user, l) } }
-            if (r.isFailure) snack.showSnackbar("Gagal sinkron ke Sheet")
-        }
-    }
-    fun pushNow() {
-        if (url.isBlank()) { scope.launch { snack.showSnackbar("Isi URL Apps Script dulu") }; return }
+    fun autoPush(newTxs: List<Tx>, newGoals: List<Goal>) {
+        if (url.isBlank()) return
         scope.launch {
-            val r = runCatching { withContext(Dispatchers.IO) { Sheet.push(url, user, all) } }
-            snack.showSnackbar(if (r.isSuccess) "Terkirim ke tab $user" else "Gagal mengirim. Cek URL.")
-        }
-    }
-    fun pullNow() {
-        scope.launch {
-            runCatching { withContext(Dispatchers.IO) { Sheet.pull(url, user) } }
-                .onSuccess { all = it; st.save(user, it); snack.showSnackbar("Diambil: ${it.size} transaksi") }
-                .onFailure { snack.showSnackbar("Gagal mengambil. Cek URL dan akses Anyone.") }
+            syncing = true
+            val r = runCatching { withContext(Dispatchers.IO) { Sheet.pushAll(url, user, newTxs, newGoals) } }
+            syncing = false
+            if (r.isFailure) snack.showSnackbar("Gagal sinkron otomatis ke Sheet")
         }
     }
 
+    fun commitTx(l: List<Tx>) {
+        all = l
+        st.save(user, l)
+        autoPush(l, goals)
+    }
+
+    fun commitGoals(g: List<Goal>) {
+        goals = g
+        st.saveGoals(user, g)
+        autoPush(all, g)
+    }
+
+    fun autoPull(silent: Boolean = false) {
+        if (url.isBlank()) return
+        scope.launch {
+            syncing = true
+            runCatching { withContext(Dispatchers.IO) { Sheet.pullAll(url, user) } }
+                .onSuccess { bundle ->
+                    if (bundle.txs.isNotEmpty() || bundle.goals.isNotEmpty()) {
+                        all = bundle.txs; st.save(user, bundle.txs)
+                        goals = bundle.goals; st.saveGoals(user, bundle.goals)
+                    } else if (all.isNotEmpty() || goals.isNotEmpty()) {
+                        withContext(Dispatchers.IO) { Sheet.pushAll(url, user, all, goals) }
+                    }
+                    if (!silent) snack.showSnackbar("Data tersinkron")
+                }
+                .onFailure {
+                    if (!silent) snack.showSnackbar("Gagal sinkron dengan Sheet")
+                }
+            syncing = false
+        }
+    }
+
+    // Sinkron otomatis saat masuk / membuka aplikasi
     LaunchedEffect(user) {
-        if (all.isEmpty()) runCatching { withContext(Dispatchers.IO) { Sheet.pull(url, user) } }
-            .onSuccess { if (it.isNotEmpty()) { all = it; st.save(user, it) } }
+        autoPull(silent = true)
     }
 
     Box(Modifier.fillMaxSize().background(BG)) {
         when (tab) {
-            0 -> HomeScreen(user, all, homeA, { homeA = it }, hide, { hide = !hide }, { searching = true }, { inc -> edit = null; formIncome = inc; showForm = true }) { edit = it; showForm = true }
-            1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }, chart) { edit = it; showForm = true }
-            else -> ProfileScreen(user, url, dev, { st.url = it.trim(); url = st.url }, chart, { chart = it; st.chart = it }, { pushNow() }, { confirmPull = true },
-                { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } }, onLogout)
+            0 -> HomeScreen(
+                user = user,
+                avatarType = avatarType,
+                syncing = syncing,
+                all = all,
+                anchor = homeA,
+                onAnchor = { homeA = it },
+                hide = hide,
+                onHide = { hide = !hide },
+                onSync = { autoPull(silent = false) },
+                onSearch = { searching = true },
+                onAdd = { inc -> edit = null; formIncome = inc; showForm = true },
+                onEdit = { edit = it; showForm = true }
+            )
+            1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }) { edit = it; showForm = true }
+            2 -> TargetScreen(
+                goals = goals,
+                syncing = syncing,
+                onSaveGoal = { g ->
+                    val exists = goals.any { it.id == g.id }
+                    commitGoals(if (exists) goals.map { if (it.id == g.id) g else it } else goals + g)
+                },
+                onDeleteGoal = { id -> commitGoals(goals.filter { it.id != id }) }
+            )
+            else -> ProfileScreen(
+                user = user,
+                avatarType = avatarType,
+                onAvatarChange = { avatarType = it; st.setAvatar(user, it) },
+                syncing = syncing,
+                url = url,
+                dev = dev,
+                onUrl = { st.url = it.trim(); url = st.url },
+                onDev = { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } },
+                onLogout = onLogout
+            )
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
         BottomBar(tab, { tab = it }, { edit = null; formIncome = false; showForm = true }, Modifier.align(Alignment.BottomCenter))
@@ -476,23 +722,16 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
 
     if (showForm) Form(
         t = edit, initialIncome = formIncome,
-        onSave = { tx -> commit(if (edit == null) all + tx else all.map { if (it.id == tx.id) tx else it }); homeA = LocalDate.parse(tx.d); showForm = false },
-        onDel = edit?.let { e -> { commit(all.filter { it.id != e.id }); showForm = false } },
+        onSave = { tx -> commitTx(if (edit == null) all + tx else all.map { if (it.id == tx.id) tx else it }); homeA = LocalDate.parse(tx.d); showForm = false },
+        onDel = edit?.let { e -> { commitTx(all.filter { it.id != e.id }); showForm = false } },
         onClose = { showForm = false }
-    )
-    if (confirmPull) AlertDialog(
-        onDismissRequest = { confirmPull = false },
-        title = { Text("Ambil dari Sheet?") },
-        text = { Text("Data $user di HP akan diganti isi tab \"$user\".") },
-        confirmButton = { TextButton({ confirmPull = false; pullNow() }) { Text("Ambil") } },
-        dismissButton = { TextButton({ confirmPull = false }) { Text("Batal") } }
     )
 }
 
 @Composable
 fun HomeScreen(
-    user: String, all: List<Tx>, anchor: LocalDate, onAnchor: (LocalDate) -> Unit,
-    hide: Boolean, onHide: () -> Unit, onSearch: () -> Unit, onAdd: (Boolean) -> Unit, onEdit: (Tx) -> Unit
+    user: String, avatarType: Int, syncing: Boolean, all: List<Tx>, anchor: LocalDate, onAnchor: (LocalDate) -> Unit,
+    hide: Boolean, onHide: () -> Unit, onSync: () -> Unit, onSearch: () -> Unit, onAdd: (Boolean) -> Unit, onEdit: (Tx) -> Unit
 ) {
     val (from, to) = rangeOf(1, anchor)
     val (pf, pt) = rangeOf(1, shiftOf(1, anchor, -1))
@@ -510,10 +749,18 @@ fun HomeScreen(
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Avatar(user, 44.dp)
+                Avatar(user, 44.dp, type = avatarType)
                 Column(Modifier.weight(1f)) {
                     Text(greet, color = Muted, fontSize = 13.sp)
-                    Text(user, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(user, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        if (syncing) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Lime)
+                        }
+                    }
+                }
+                Surface(onClick = onSync, enabled = !syncing, shape = CircleShape, color = Card2) {
+                    Icon(Icons.Rounded.Sync, "Sinkronkan", tint = if (syncing) Lime else White, modifier = Modifier.padding(11.dp).size(22.dp))
                 }
                 Surface(onClick = onSearch, shape = CircleShape, color = Card2) {
                     Icon(Icons.Rounded.Search, "Cari transaksi", tint = White, modifier = Modifier.padding(11.dp).size(22.dp))
@@ -609,7 +856,8 @@ fun HomeScreen(
         if (list.isEmpty()) item { Text("Belum ada transaksi bulan ini. Ketuk tombol hijau untuk mencatat.", color = Muted, fontSize = 14.sp) }
         list.groupBy { it.d }.forEach { (d, l) ->
             item(key = "h$d") {
-                Text(LocalDate.parse(d).format(DateTimeFormatter.ofPattern("EEEE, d MMMM", ID)), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                val formattedDate = runCatching { LocalDate.parse(d).format(DateTimeFormatter.ofPattern("EEEE, d MMMM", ID)) }.getOrDefault(d)
+                Text(formattedDate, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
             }
             l.forEach { t -> item(key = t.id) { TxRow(t) { onEdit(t) } } }
         }
@@ -617,9 +865,220 @@ fun HomeScreen(
 }
 
 @Composable
+fun TargetScreen(
+    goals: List<Goal>,
+    syncing: Boolean,
+    onSaveGoal: (Goal) -> Unit,
+    onDeleteGoal: (Long) -> Unit
+) {
+    var editingGoal by remember { mutableStateOf<Goal?>(null) }
+    var showDialog by remember { mutableStateOf(false) }
+    var topupGoal by remember { mutableStateOf<Goal?>(null) }
+
+    val totalTarget = goals.sumOf { it.target }
+    val totalSaved = goals.sumOf { it.saved }
+    val overallPct = if (totalTarget > 0) ((totalSaved * 100) / totalTarget).coerceIn(0L, 100L).toInt() else 0
+
+    LazyColumn(
+        Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Target", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
+                    if (syncing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
+                }
+                Surface(
+                    onClick = { editingGoal = null; showDialog = true },
+                    shape = CircleShape,
+                    color = Blue
+                ) {
+                    Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Rounded.Add, null, tint = White, modifier = Modifier.size(18.dp))
+                        Text("Target baru", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+        item {
+            Panel {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconCircle(Icons.Rounded.Flag, bg = Lime, tint = BG)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Total terkumpul", color = Muted, fontSize = 13.sp)
+                        Money(totalSaved, 28.sp)
+                    }
+                    Pill("$overallPct%", Blue, White)
+                }
+                Spacer(Modifier.height(14.dp))
+                val frac = if (totalTarget > 0) (totalSaved.toFloat() / totalTarget).coerceIn(0f, 1f) else 0f
+                Box(Modifier.fillMaxWidth().height(12.dp).clip(CircleShape).background(Card2)) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(Lime))
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    if (totalTarget > 0) "Dari total target " + rp(totalTarget) + " (${goals.size} target)" else "Belum ada target tabungan yang dibuat",
+                    color = Muted,
+                    fontSize = 12.sp
+                )
+            }
+        }
+        if (goals.isEmpty()) {
+            item {
+                Panel {
+                    Text("Mulai tetapkan tujuanmu", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Buat target seperti Dana Darurat, Beli Laptop, atau Liburan dan pantau progresnya secara otomatis.", color = Muted, fontSize = 13.sp)
+                }
+            }
+        }
+        items(goals, key = { it.id }) { g ->
+            val pct = if (g.target > 0) ((g.saved * 100) / g.target).coerceIn(0L, 100L).toInt() else 0
+            val done = g.saved >= g.target && g.target > 0
+            val frac = if (g.target > 0) (g.saved.toFloat() / g.target).coerceIn(0f, 1f) else 0f
+            Panel {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) {
+                        Text(g.title, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        if (g.deadline.isNotBlank()) {
+                            Text("Batas waktu: ${g.deadline}", color = Muted, fontSize = 12.sp)
+                        }
+                    }
+                    Pill(if (done) "Tercapai" else "$pct%", if (done) Green else Card2, if (done) BG else White)
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(rp(g.saved), color = Lime, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Target " + rp(g.target), color = Muted, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Box(Modifier.fillMaxWidth().height(10.dp).clip(CircleShape).background(Card2)) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(if (done) Green else Blue))
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = { topupGoal = g },
+                        shape = CircleShape,
+                        color = Blue,
+                        modifier = Modifier.weight(1f).height(42.dp)
+                    ) {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) {
+                            Text("+ Tambah Dana", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    Surface(
+                        onClick = { editingGoal = g; showDialog = true },
+                        shape = CircleShape,
+                        color = Card2,
+                        modifier = Modifier.height(42.dp)
+                    ) {
+                        Box(Modifier.padding(horizontal = 16.dp), Alignment.Center) {
+                            Text("Ubah", color = White, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        GoalDialog(
+            goal = editingGoal,
+            onSave = { onSaveGoal(it); showDialog = false },
+            onDelete = editingGoal?.let { e -> { onDeleteGoal(e.id); showDialog = false } },
+            onClose = { showDialog = false }
+        )
+    }
+
+    topupGoal?.let { g ->
+        TopupGoalDialog(
+            goal = g,
+            onAdd = { addAmt ->
+                onSaveGoal(g.copy(saved = (g.saved + addAmt).coerceAtLeast(0L)))
+                topupGoal = null
+            },
+            onClose = { topupGoal = null }
+        )
+    }
+}
+
+@Composable
+fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onClose: () -> Unit) {
+    var title by remember { mutableStateOf(goal?.title ?: "") }
+    var target by remember { mutableStateOf(goal?.target?.toString() ?: "") }
+    var saved by remember { mutableStateOf(goal?.saved?.toString() ?: "0") }
+    var deadline by remember { mutableStateOf(goal?.deadline ?: LocalDate.now().plusMonths(3).toString()) }
+
+    AlertDialog(
+        onDismissRequest = onClose,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text(if (goal == null) "Target baru" else "Ubah target", color = White) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("Nama target (mis. Dana Darurat)") }, singleLine = true)
+                OutlinedTextField(target, { target = it.filter(Char::isDigit) }, label = { Text("Nominal target (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(saved, { saved = it.filter(Char::isDigit) }, label = { Text("Sudah terkumpul (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(deadline, { deadline = it }, label = { Text("Batas waktu (yyyy-MM-dd)") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton({
+                val tg = target.toLongOrNull() ?: 0L
+                val sv = saved.toLongOrNull() ?: 0L
+                val dl = runCatching { LocalDate.parse(deadline).toString() }.getOrDefault(deadline.trim())
+                if (title.isNotBlank() && tg > 0) {
+                    onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, dl))
+                }
+            }) { Text("Simpan", color = Blue) }
+        },
+        dismissButton = {
+            Row {
+                if (onDelete != null) IconButton(onDelete) { Icon(Icons.Rounded.Delete, "Hapus", tint = Red) }
+                TextButton(onClose) { Text("Batal", color = Muted) }
+            }
+        }
+    )
+}
+
+@Composable
+fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
+    var amount by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onClose,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text("Tambah ke ${goal.title}", color = White) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Terkumpul saat ini: " + rp(goal.saved) + " / " + rp(goal.target), color = Muted, fontSize = 13.sp)
+                OutlinedTextField(
+                    amount,
+                    { amount = it.filter(Char::isDigit) },
+                    label = { Text("Nominal tambahan (Rp)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            TextButton({
+                val v = amount.toLongOrNull() ?: 0L
+                if (v > 0) onAdd(v)
+            }) { Text("Tambah", color = Blue) }
+        },
+        dismissButton = {
+            TextButton(onClose) { Text("Batal", color = Muted) }
+        }
+    )
+}
+
+@Composable
 fun SearchScreen(all: List<Tx>, onClose: () -> Unit, onEdit: (Tx) -> Unit) {
     var q by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf(0) } // 0 semua, 1 pemasukan, 2 pengeluaran
+    var type by remember { mutableStateOf(0) }
     val fr = remember { FocusRequester() }
     BackHandler(onBack = onClose)
     LaunchedEffect(Unit) { fr.requestFocus() }
@@ -659,7 +1118,7 @@ fun SearchScreen(all: List<Tx>, onClose: () -> Unit, onEdit: (Tx) -> Unit) {
 }
 
 @Composable
-fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalDate, onAnchor: (LocalDate) -> Unit, showChart: Boolean, onEdit: (Tx) -> Unit) {
+fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalDate, onAnchor: (LocalDate) -> Unit, onEdit: (Tx) -> Unit) {
     val (from, to) = rangeOf(mode, anchor)
     val (pf, pt) = rangeOf(mode, shiftOf(mode, anchor, -1))
     val list = within(all, from, to).sortedByDescending { it.d }
@@ -685,8 +1144,7 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
             Panel {
                 Segmented(listOf("Minggu", "Bulan", "Tahun"), mode, onMode)
                 PeriodNav(labelOf(mode, from, to), { onAnchor(shiftOf(mode, anchor, -1)) }, { onAnchor(shiftOf(mode, anchor, 1)) })
-                if (showChart) Chart(bi, be)
-                else Text("Grafik dimatikan. Nyalakan di Profil.", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                Chart(bi, be)
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(color = Card2)
                 Spacer(Modifier.height(12.dp))
@@ -742,8 +1200,15 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
 
 @Composable
 fun ProfileScreen(
-    user: String, url: String, dev: Boolean, onUrl: (String) -> Unit,
-    chart: Boolean, onChart: (Boolean) -> Unit, onPush: () -> Unit, onPull: () -> Unit, onDev: (Boolean) -> Unit, onLogout: () -> Unit
+    user: String,
+    avatarType: Int,
+    onAvatarChange: (Int) -> Unit,
+    syncing: Boolean,
+    url: String,
+    dev: Boolean,
+    onUrl: (String) -> Unit,
+    onDev: (Boolean) -> Unit,
+    onLogout: () -> Unit
 ) {
     var u by remember { mutableStateOf(url) }
     var taps by remember { mutableStateOf(0) }
@@ -751,33 +1216,52 @@ fun ProfileScreen(
         Text("Profil", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Avatar(user, 64.dp, Blue)
-                Column {
-                    Text(user, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Tab sheet: $user", color = Muted, fontSize = 13.sp)
-                }
-            }
-        }
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(user, 64.dp, Blue, type = avatarType)
                 Column(Modifier.weight(1f)) {
-                    Text("Tampilkan grafik", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Text("Di halaman Laporan", color = Muted, fontSize = 13.sp)
+                    Text(user, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync otomatis aktif · tab \"$user\"",
+                            color = if (syncing) Lime else Muted,
+                            fontSize = 13.sp
+                        )
+                        if (syncing) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Lime)
+                    }
                 }
-                Switch(chart, onChart, colors = SwitchDefaults.colors(checkedTrackColor = Blue, checkedThumbColor = White))
             }
         }
         Panel {
-            Text("Google Sheets", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(6.dp))
-            Text("Perubahan terkirim otomatis ke tab \"$user\".", color = Muted, fontSize = 13.sp)
+            Text("Pilih Avatar", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(onClick = onPush, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Kirim ke Sheet", color = White, fontWeight = FontWeight.Medium) }
-                }
-                Surface(onClick = onPull, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Ambil dari Sheet", color = White, fontWeight = FontWeight.Medium) }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                AVATARS.forEachIndexed { idx, label ->
+                    val selected = avatarType == idx
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onAvatarChange(idx) }
+                            .background(if (selected) Card2 else Color.Transparent)
+                            .border(
+                                width = if (selected) 1.5.dp else 0.dp,
+                                color = if (selected) Lime else Color.Transparent,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Avatar(user, 48.dp, Blue, type = idx)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            label,
+                            color = if (selected) Lime else Muted,
+                            fontSize = 11.sp,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
                 }
             }
         }
@@ -801,7 +1285,7 @@ fun ProfileScreen(
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
         Text(
-            "NoteCash v1.0", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+            "NoteCash v1.1", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clickable { taps++; if (taps >= 7 && !dev) { taps = 0; onDev(true) } }.padding(16.dp)
         )
     }
