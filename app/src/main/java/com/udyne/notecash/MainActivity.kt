@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
 
 package com.udyne.notecash
 
@@ -9,6 +9,17 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -32,10 +43,11 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
@@ -84,7 +96,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/* ---------- Palet (mengikuti desain Orbix: gelap, biru, lime) ---------- */
+/* ---------- Palet (Orbix dark + blue + lime) ---------- */
 val BG = Color(0xFF0D1018)
 val CardC = Color(0xFF1A1E2A)
 val Card2 = Color(0xFF262B3A)
@@ -109,7 +121,7 @@ const val DEFAULT_SHEET_URL = "https://s.id/notecash"
 val USER_RE = Regex("^[a-z0-9_]{2,30}$")
 val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya")
 val IN = listOf("Gaji", "Bonus", "Usaha", "Hadiah", "Lainnya")
-val AVATARS = listOf("Inisial", "Laki-laki", "Perempuan", "Berhijab", "Kacamata", "Anak")
+val AVATARS = listOf("Inisial", "Laki-laki", "Perempuan", "Kacamata", "Anak")
 val ID = Locale("id", "ID")
 
 data class Tx(val id: Long, val d: String, val income: Boolean, val c: String, val a: Long, val n: String)
@@ -147,6 +159,9 @@ fun labelOf(mode: Int, from: LocalDate, to: LocalDate): String = when (mode) {
     else -> from.year.toString()
 }
 
+fun formatIdDate(raw: String, pattern: String = "EEEE, d MMMM"): String =
+    runCatching { LocalDate.parse(raw).format(DateTimeFormatter.ofPattern(pattern, ID)) }.getOrDefault(raw)
+
 class Store(ctx: Context) {
     private val p = ctx.getSharedPreferences("catatan", 0)
     var url: String
@@ -162,8 +177,8 @@ class Store(ctx: Context) {
         get() = p.getString("user", null)
         set(v) { p.edit().putString("user", v).apply() }
 
-    fun avatarOf(u: String): Int = p.getInt("av_$u", 0)
-    fun setAvatar(u: String, idx: Int) { p.edit().putInt("av_$u", idx).apply() }
+    fun avatarOf(u: String): Int = p.getInt("av_$u", 0).coerceIn(0, AVATARS.lastIndex)
+    fun setAvatar(u: String, idx: Int) { p.edit().putInt("av_$u", idx.coerceIn(0, AVATARS.lastIndex)).apply() }
 
     fun load(u: String): List<Tx> = runCatching {
         val j = JSONArray(p.getString("tx_$u", "[]"))
@@ -201,8 +216,11 @@ object Sheet {
         repeat(5) {
             val host = URL(cur).host
             if (host.endsWith("google.com") || host.endsWith("googleusercontent.com")) return cur
-            val c = URL(cur).openConnection() as HttpURLConnection
-            c.instanceFollowRedirects = false; c.connectTimeout = 10000; c.readTimeout = 10000
+            val c = (URL(cur).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                connectTimeout = 10000
+                readTimeout = 10000
+            }
             val code = c.responseCode
             val loc = c.getHeaderField("Location")
             c.disconnect()
@@ -219,20 +237,28 @@ object Sheet {
         goals.forEach {
             rows.put(JSONArray().put(it.id.toString()).put(it.deadline).put("Target").put(it.title).put(it.target).put(it.saved.toString()))
         }
-        val c = URL(resolve(url)).openConnection() as HttpURLConnection
-        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 12000; c.readTimeout = 12000
-        c.setRequestProperty("Content-Type", "text/plain;charset=utf-8")
+        val c = (URL(resolve(url)).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 12000
+            readTimeout = 12000
+            setRequestProperty("Content-Type", "text/plain;charset=utf-8")
+        }
         c.outputStream.use { it.write(JSONObject().put("user", user).put("rows", rows).toString().toByteArray()) }
-        c.inputStream.close(); c.disconnect()
+        c.inputStream.close()
+        c.disconnect()
     }
 
     fun pullAll(url: String, user: String): SyncBundle {
         val base = resolve(url)
         val sep = if (base.contains("?")) "&" else "?"
-        val c = URL(base + sep + "user=" + URLEncoder.encode(user, "UTF-8")).openConnection() as HttpURLConnection
-        c.connectTimeout = 12000; c.readTimeout = 12000
-        val s = c.inputStream.bufferedReader().readText(); c.disconnect()
-        val j = JSONArray(s)
+        val c = (URL(base + sep + "user=" + URLEncoder.encode(user, "UTF-8")).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 12000
+            readTimeout = 12000
+        }
+        val raw = c.inputStream.bufferedReader().readText()
+        c.disconnect()
+        val j = JSONArray(raw)
         val txs = mutableListOf<Tx>()
         val goals = mutableListOf<Goal>()
         for (i in 0 until j.length()) {
@@ -241,26 +267,9 @@ object Sheet {
             val id = r.optString(0).toLongOrNull() ?: System.nanoTime()
             val tipe = r.optString(2)
             if (tipe == "Target") {
-                goals.add(
-                    Goal(
-                        id = id,
-                        title = r.optString(3).ifBlank { "Target" },
-                        target = r.optLong(4),
-                        saved = r.optString(5).toLongOrNull() ?: 0L,
-                        deadline = r.optString(1).take(10)
-                    )
-                )
+                goals.add(Goal(id, r.optString(3).ifBlank { "Target" }, r.optLong(4), r.optString(5).toLongOrNull() ?: 0L, r.optString(1).take(10)))
             } else {
-                txs.add(
-                    Tx(
-                        id = id,
-                        d = r.optString(1).take(10),
-                        income = tipe == "Pemasukan",
-                        c = r.optString(3).ifBlank { "Lainnya" },
-                        a = r.optLong(4),
-                        n = r.optString(5)
-                    )
-                )
+                txs.add(Tx(id, r.optString(1).take(10), tipe == "Pemasukan", r.optString(3).ifBlank { "Lainnya" }, r.optLong(4), r.optString(5)))
             }
         }
         return SyncBundle(txs, goals)
@@ -286,9 +295,17 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = scheme, typography = Typography().withFont(AppFont)) {
                 Surface(Modifier.fillMaxSize(), color = BG) {
                     var user by remember { mutableStateOf(st.user) }
-                    val u = user
-                    if (u == null) LoginScreen(st.last ?: "") { st.user = it; st.last = it; user = it }
-                    else Main(st, u) { st.user = null; user = null }
+                    AnimatedContent(
+                        targetState = user,
+                        transitionSpec = { fadeIn(tween(240)) togetherWith fadeOut(tween(180)) },
+                        label = "auth_transition"
+                    ) { current ->
+                        if (current == null) {
+                            LoginScreen(st.last ?: "") { st.user = it; st.last = it; user = it }
+                        } else {
+                            Main(st, current) { st.user = null; user = null }
+                        }
+                    }
                 }
             }
         }
@@ -310,14 +327,26 @@ fun Pill(text: String, bg: Color, fg: Color) {
     }
 }
 
+@Composable
+fun AnimatedBar(fraction: Float, trackColor: Color = Card2, fillColor: Color = Blue, height: Dp = 10.dp, rounded: Boolean = true) {
+    val animFrac by animateFloatAsState(
+        targetValue = fraction.coerceIn(0f, 1f),
+        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        label = "bar_progress"
+    )
+    val shape = if (rounded) CircleShape else RoundedCornerShape(10.dp)
+    Box(Modifier.fillMaxWidth().height(height).clip(shape).background(trackColor)) {
+        Box(Modifier.fillMaxHeight().fillMaxWidth(animFrac).background(fillColor))
+    }
+}
+
 /**
  * Avatar Vector:
  * 0 = Inisial huruf
  * 1 = Laki-laki
  * 2 = Perempuan
- * 3 = Perempuan Berhijab
- * 4 = Berkacamata
- * 5 = Anak / Muda
+ * 3 = Berkacamata
+ * 4 = Anak / Muda
  */
 @Composable
 fun Avatar(name: String, size: Dp, bg: Color = Card2, type: Int = 0) {
@@ -332,35 +361,17 @@ fun Avatar(name: String, size: Dp, bg: Color = Card2, type: Int = 0) {
                 val cx = w / 2f
                 val skin = Color(0xFFF3C6A5)
                 val darkHair = Color(0xFF1F2430)
-                val hijabColor = Color(0xFF5C6BC0)
-                val shirtMale = Color(0xFF0A9BF0)
-                val shirtFemale = Color(0xFFEC407A)
-                val shirtKid = Color(0xFF2ED573)
 
-                // Latar aksen lembut
                 drawCircle(
                     color = when (type) {
                         1 -> Color(0xFF1B3A57)
                         2 -> Color(0xFF4A2545)
-                        3 -> Color(0xFF2B2D5C)
-                        4 -> Color(0xFF1E3D3B)
+                        3 -> Color(0xFF1E3D3B)
                         else -> Color(0xFF3E3A1E)
                     },
                     radius = w * 0.5f
                 )
 
-                // Kerudung belakang (untuk Berhijab)
-                if (type == 3) {
-                    drawCircle(hijabColor, radius = w * 0.31f, center = Offset(cx, h * 0.44f))
-                    drawRoundRect(
-                        color = hijabColor,
-                        topLeft = Offset(w * 0.20f, h * 0.42f),
-                        size = Size(w * 0.60f, h * 0.48f),
-                        cornerRadius = CornerRadius(w * 0.25f)
-                    )
-                }
-
-                // Rambut panjang belakang (untuk Perempuan)
                 if (type == 2) {
                     drawRoundRect(
                         color = darkHair,
@@ -370,12 +381,10 @@ fun Avatar(name: String, size: Dp, bg: Color = Card2, type: Int = 0) {
                     )
                 }
 
-                // Badan / Bahu
                 val shirt = when (type) {
-                    1, 4 -> shirtMale
-                    2 -> shirtFemale
-                    3 -> Color(0xFF7986CB)
-                    else -> shirtKid
+                    1, 3 -> Color(0xFF0A9BF0)
+                    2 -> Color(0xFFEC407A)
+                    else -> Color(0xFF2ED573)
                 }
                 drawRoundRect(
                     color = shirt,
@@ -384,66 +393,43 @@ fun Avatar(name: String, size: Dp, bg: Color = Card2, type: Int = 0) {
                     cornerRadius = CornerRadius(w * 0.30f)
                 )
 
-                // Leher
-                drawRect(
-                    color = skin,
-                    topLeft = Offset(cx - w * 0.07f, h * 0.56f),
-                    size = Size(w * 0.14f, h * 0.16f)
-                )
+                drawRect(skin, topLeft = Offset(cx - w * 0.07f, h * 0.56f), size = Size(w * 0.14f, h * 0.16f))
 
-                // Kepala
-                val headR = if (type == 5) w * 0.24f else w * 0.22f
-                val headY = if (type == 5) h * 0.44f else h * 0.42f
+                val headR = if (type == 4) w * 0.24f else w * 0.22f
+                val headY = if (type == 4) h * 0.44f else h * 0.42f
                 drawCircle(skin, radius = headR, center = Offset(cx, headY))
 
-                // Hijab bingkai wajah (type 3)
-                if (type == 3) {
-                    drawArc(
-                        color = hijabColor,
-                        startAngle = 175f,
-                        sweepAngle = 190f,
-                        useCenter = false,
-                        topLeft = Offset(cx - headR * 1.08f, headY - headR * 1.08f),
-                        size = Size(headR * 2.16f, headR * 2.16f),
-                        style = Stroke(width = w * 0.09f, cap = StrokeCap.Round)
-                    )
-                } else {
-                    // Rambut atas (Laki-laki, Perempuan, Kacamata, Anak)
-                    drawArc(
-                        color = darkHair,
-                        startAngle = 180f,
-                        sweepAngle = 180f,
-                        useCenter = true,
-                        topLeft = Offset(cx - headR * 1.02f, headY - headR * 1.08f),
-                        size = Size(headR * 2.04f, headR * 1.35f)
-                    )
-                    if (type == 5) {
-                        // Jambul anak
-                        val tuft = Path().apply {
-                            moveTo(cx - w * 0.04f, headY - headR * 0.95f)
-                            lineTo(cx + w * 0.02f, headY - headR * 1.28f)
-                            lineTo(cx + w * 0.06f, headY - headR * 0.92f)
-                            close()
-                        }
-                        drawPath(tuft, darkHair)
+                drawArc(
+                    color = darkHair,
+                    startAngle = 180f,
+                    sweepAngle = 180f,
+                    useCenter = true,
+                    topLeft = Offset(cx - headR * 1.02f, headY - headR * 1.08f),
+                    size = Size(headR * 2.04f, headR * 1.35f)
+                )
+
+                if (type == 4) {
+                    val tuft = Path().apply {
+                        moveTo(cx - w * 0.04f, headY - headR * 0.95f)
+                        lineTo(cx + w * 0.02f, headY - headR * 1.28f)
+                        lineTo(cx + w * 0.06f, headY - headR * 0.92f)
+                        close()
                     }
+                    drawPath(tuft, darkHair)
                 }
 
-                // Mata
                 val eyeY = headY + headR * 0.05f
                 val eyeOffset = headR * 0.36f
                 drawCircle(darkHair, radius = w * 0.024f, center = Offset(cx - eyeOffset, eyeY))
                 drawCircle(darkHair, radius = w * 0.024f, center = Offset(cx + eyeOffset, eyeY))
 
-                // Kacamata (type 4)
-                if (type == 4) {
+                if (type == 3) {
                     val lensR = headR * 0.30f
                     drawCircle(White, radius = lensR, center = Offset(cx - eyeOffset, eyeY), style = Stroke(w * 0.024f))
                     drawCircle(White, radius = lensR, center = Offset(cx + eyeOffset, eyeY), style = Stroke(w * 0.024f))
                     drawLine(White, Offset(cx - eyeOffset + lensR, eyeY), Offset(cx + eyeOffset - lensR, eyeY), strokeWidth = w * 0.024f)
                 }
 
-                // Senyum
                 drawArc(
                     color = Color(0xFF9E5A4A),
                     startAngle = 20f,
@@ -502,7 +488,7 @@ fun Segmented(options: List<String>, sel: Int, onSel: (Int) -> Unit) {
 
 @Composable
 fun TxRow(t: Tx, showDate: Boolean = false, onClick: () -> Unit) {
-    val sub = if (showDate) listOf(t.d, t.n).filter { it.isNotBlank() }.joinToString(" · ") else if (t.n.isBlank()) "Tanpa catatan" else t.n
+    val sub = if (showDate) listOf(t.d, t.n).filter { it.isNotBlank() }.joinToString(" · ") else t.n.ifBlank { "Tanpa catatan" }
     Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = CardC, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Avatar(t.c, 42.dp, type = 0)
@@ -518,9 +504,11 @@ fun TxRow(t: Tx, showDate: Boolean = false, onClick: () -> Unit) {
 @Composable
 fun NavItem(sel: Boolean, icon: ImageVector, label: String, onClick: () -> Unit) {
     Surface(onClick = onClick, shape = CircleShape, color = if (sel) BG else Card2) {
-        Row(Modifier.height(44.dp).padding(horizontal = if (sel) 13.dp else 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(icon, label, tint = if (sel) White else Muted, modifier = Modifier.size(20.dp))
-            if (sel) Text(label, color = White, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1)
+        Row(Modifier.height(44.dp).padding(horizontal = if (sel) 12.dp else 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Icon(icon, label, tint = if (sel) White else Muted, modifier = Modifier.size(19.dp))
+            AnimatedVisibility(visible = sel, enter = fadeIn(tween(150)), exit = fadeOut(tween(120))) {
+                Text(label, color = White, fontWeight = FontWeight.Medium, fontSize = 12.sp, maxLines = 1)
+            }
         }
     }
 }
@@ -536,7 +524,7 @@ fun BottomBar(tab: Int, onTab: (Int) -> Unit, onAdd: () -> Unit, modifier: Modif
                     Box(Modifier.size(44.dp), Alignment.Center) { Icon(Icons.Rounded.Add, "Catat", tint = BG) }
                 }
                 NavItem(tab == 2, Icons.Rounded.Flag, "Target") { onTab(2) }
-                NavItem(tab == 3, Icons.Rounded.Person, "Profil") { onTab(3) }
+                NavItem(tab == 3, Icons.Rounded.Settings, "Settings") { onTab(3) }
             }
         }
     }
@@ -640,15 +628,11 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
     }
 
     fun commitTx(l: List<Tx>) {
-        all = l
-        st.save(user, l)
-        autoPush(l, goals)
+        all = l; st.save(user, l); autoPush(l, goals)
     }
 
     fun commitGoals(g: List<Goal>) {
-        goals = g
-        st.saveGoals(user, g)
-        autoPush(all, g)
+        goals = g; st.saveGoals(user, g); autoPush(all, g)
     }
 
     fun autoPull(silent: Boolean = false) {
@@ -665,64 +649,64 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
                     }
                     if (!silent) snack.showSnackbar("Data tersinkron")
                 }
-                .onFailure {
-                    if (!silent) snack.showSnackbar("Gagal sinkron dengan Sheet")
-                }
+                .onFailure { if (!silent) snack.showSnackbar("Gagal sinkron dengan Sheet") }
             syncing = false
         }
     }
 
-    // Sinkron otomatis saat masuk / membuka aplikasi
-    LaunchedEffect(user) {
-        autoPull(silent = true)
-    }
+    LaunchedEffect(user) { autoPull(silent = true) }
 
     Box(Modifier.fillMaxSize().background(BG)) {
-        when (tab) {
-            0 -> HomeScreen(
-                user = user,
-                avatarType = avatarType,
-                syncing = syncing,
-                all = all,
-                anchor = homeA,
-                onAnchor = { homeA = it },
-                hide = hide,
-                onHide = { hide = !hide },
-                onSync = { autoPull(silent = false) },
-                onSearch = { searching = true },
-                onAdd = { inc -> edit = null; formIncome = inc; showForm = true },
-                onEdit = { edit = it; showForm = true }
-            )
-            1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }) { edit = it; showForm = true }
-            2 -> TargetScreen(
-                goals = goals,
-                syncing = syncing,
-                onSaveGoal = { g ->
-                    val exists = goals.any { it.id == g.id }
-                    commitGoals(if (exists) goals.map { if (it.id == g.id) g else it } else goals + g)
-                },
-                onDeleteGoal = { id -> commitGoals(goals.filter { it.id != id }) }
-            )
-            else -> ProfileScreen(
-                user = user,
-                avatarType = avatarType,
-                onAvatarChange = { avatarType = it; st.setAvatar(user, it) },
-                syncing = syncing,
-                url = url,
-                dev = dev,
-                onUrl = { st.url = it.trim(); url = st.url },
-                onDev = { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } },
-                onLogout = onLogout
-            )
+        AnimatedContent(
+            targetState = tab,
+            transitionSpec = {
+                val dir = if (targetState > initialState) 1 else -1
+                (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { it / 14 * dir }) togetherWith
+                    (fadeOut(tween(160)) + slideOutHorizontally(tween(180)) { -it / 18 * dir })
+            },
+            label = "tab_transition"
+        ) { activeTab ->
+            when (activeTab) {
+                0 -> HomeScreen(
+                    user = user, avatarType = avatarType, syncing = syncing, all = all,
+                    anchor = homeA, onAnchor = { homeA = it }, hide = hide, onHide = { hide = !hide },
+                    onSync = { autoPull(silent = false) }, onSearch = { searching = true },
+                    onAdd = { inc -> edit = null; formIncome = inc; showForm = true },
+                    onEdit = { edit = it; showForm = true }
+                )
+                1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }) { edit = it; showForm = true }
+                2 -> TargetScreen(
+                    goals = goals, syncing = syncing,
+                    onSaveGoal = { g ->
+                        val exists = goals.any { it.id == g.id }
+                        commitGoals(if (exists) goals.map { if (it.id == g.id) g else it } else goals + g)
+                    },
+                    onDeleteGoal = { id -> commitGoals(goals.filter { it.id != id }) }
+                )
+                else -> SettingsScreen(
+                    user = user, avatarType = avatarType,
+                    onAvatarChange = { avatarType = it; st.setAvatar(user, it) },
+                    syncing = syncing, url = url, dev = dev,
+                    onUrl = { st.url = it.trim(); url = st.url },
+                    onDev = { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } },
+                    onLogout = onLogout
+                )
+            }
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
         BottomBar(tab, { tab = it }, { edit = null; formIncome = false; showForm = true }, Modifier.align(Alignment.BottomCenter))
-        if (searching) SearchScreen(all, { searching = false }) { edit = it; showForm = true }
+        AnimatedVisibility(
+            visible = searching,
+            enter = fadeIn(tween(180)) + slideInHorizontally(tween(220)) { it / 6 },
+            exit = fadeOut(tween(150)) + slideOutHorizontally(tween(180)) { it / 6 }
+        ) {
+            SearchScreen(all, { searching = false }) { edit = it; showForm = true }
+        }
     }
 
     if (showForm) Form(
         t = edit, initialIncome = formIncome,
-        onSave = { tx -> commitTx(if (edit == null) all + tx else all.map { if (it.id == tx.id) tx else it }); homeA = LocalDate.parse(tx.d); showForm = false },
+        onSave = { tx -> commitTx(if (edit == null) all + tx else all.map { if (it.id == tx.id) tx else it }); homeA = runCatching { LocalDate.parse(tx.d) }.getOrDefault(homeA); showForm = false },
         onDel = edit?.let { e -> { commitTx(all.filter { it.id != e.id }); showForm = false } },
         onClose = { showForm = false }
     )
@@ -754,7 +738,7 @@ fun HomeScreen(
                     Text(greet, color = Muted, fontSize = 13.sp)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(user, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        if (syncing) {
+                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut()) {
                             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Lime)
                         }
                     }
@@ -844,10 +828,8 @@ fun HomeScreen(
                     color = Muted, fontSize = 13.sp
                 )
                 Spacer(Modifier.height(14.dp))
-                val frac = if (s.inc > 0) (s.exp.toFloat() / s.inc).coerceIn(0f, 1f) else if (s.exp > 0) 1f else 0f
-                Box(Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(10.dp)).background(Card2)) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(Blue))
-                }
+                val frac = if (s.inc > 0) s.exp.toFloat() / s.inc else if (s.exp > 0) 1f else 0f
+                AnimatedBar(fraction = frac, trackColor = Card2, fillColor = Blue, height = 30.dp, rounded = false)
                 Spacer(Modifier.height(6.dp))
                 Text(if (s.inc > 0) (s.exp * 100 / s.inc).toString() + "% dari pemasukan bulan ini" else "Belum ada pemasukan bulan ini", color = Muted, fontSize = 12.sp)
             }
@@ -855,22 +837,14 @@ fun HomeScreen(
         item { Text("Transaksi", color = White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp)) }
         if (list.isEmpty()) item { Text("Belum ada transaksi bulan ini. Ketuk tombol hijau untuk mencatat.", color = Muted, fontSize = 14.sp) }
         list.groupBy { it.d }.forEach { (d, l) ->
-            item(key = "h$d") {
-                val formattedDate = runCatching { LocalDate.parse(d).format(DateTimeFormatter.ofPattern("EEEE, d MMMM", ID)) }.getOrDefault(d)
-                Text(formattedDate, color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
-            }
+            item(key = "h$d") { Text(formatIdDate(d), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp)) }
             l.forEach { t -> item(key = t.id) { TxRow(t) { onEdit(t) } } }
         }
     }
 }
 
 @Composable
-fun TargetScreen(
-    goals: List<Goal>,
-    syncing: Boolean,
-    onSaveGoal: (Goal) -> Unit,
-    onDeleteGoal: (Long) -> Unit
-) {
+fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit, onDeleteGoal: (Long) -> Unit) {
     var editingGoal by remember { mutableStateOf<Goal?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var topupGoal by remember { mutableStateOf<Goal?>(null) }
@@ -888,13 +862,11 @@ fun TargetScreen(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Target", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-                    if (syncing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
+                    AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut()) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
+                    }
                 }
-                Surface(
-                    onClick = { editingGoal = null; showDialog = true },
-                    shape = CircleShape,
-                    color = Blue
-                ) {
+                Surface(onClick = { editingGoal = null; showDialog = true }, shape = CircleShape, color = Blue) {
                     Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Rounded.Add, null, tint = White, modifier = Modifier.size(18.dp))
                         Text("Target baru", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
@@ -914,15 +886,11 @@ fun TargetScreen(
                     Pill("$overallPct%", Blue, White)
                 }
                 Spacer(Modifier.height(14.dp))
-                val frac = if (totalTarget > 0) (totalSaved.toFloat() / totalTarget).coerceIn(0f, 1f) else 0f
-                Box(Modifier.fillMaxWidth().height(12.dp).clip(CircleShape).background(Card2)) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(Lime))
-                }
+                AnimatedBar(fraction = if (totalTarget > 0) totalSaved.toFloat() / totalTarget else 0f, fillColor = Lime)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     if (totalTarget > 0) "Dari total target " + rp(totalTarget) + " (${goals.size} target)" else "Belum ada target tabungan yang dibuat",
-                    color = Muted,
-                    fontSize = 12.sp
+                    color = Muted, fontSize = 12.sp
                 )
             }
         }
@@ -938,14 +906,11 @@ fun TargetScreen(
         items(goals, key = { it.id }) { g ->
             val pct = if (g.target > 0) ((g.saved * 100) / g.target).coerceIn(0L, 100L).toInt() else 0
             val done = g.saved >= g.target && g.target > 0
-            val frac = if (g.target > 0) (g.saved.toFloat() / g.target).coerceIn(0f, 1f) else 0f
             Panel {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f)) {
                         Text(g.title, color = White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        if (g.deadline.isNotBlank()) {
-                            Text("Batas waktu: ${g.deadline}", color = Muted, fontSize = 12.sp)
-                        }
+                        if (g.deadline.isNotBlank()) Text("Batas waktu: ${g.deadline}", color = Muted, fontSize = 12.sp)
                     }
                     Pill(if (done) "Tercapai" else "$pct%", if (done) Green else Card2, if (done) BG else White)
                 }
@@ -955,30 +920,14 @@ fun TargetScreen(
                     Text("Target " + rp(g.target), color = Muted, fontSize = 13.sp)
                 }
                 Spacer(Modifier.height(8.dp))
-                Box(Modifier.fillMaxWidth().height(10.dp).clip(CircleShape).background(Card2)) {
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(frac).background(if (done) Green else Blue))
-                }
+                AnimatedBar(fraction = if (g.target > 0) g.saved.toFloat() / g.target else 0f, fillColor = if (done) Green else Blue)
                 Spacer(Modifier.height(14.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        onClick = { topupGoal = g },
-                        shape = CircleShape,
-                        color = Blue,
-                        modifier = Modifier.weight(1f).height(42.dp)
-                    ) {
-                        Box(Modifier.fillMaxSize(), Alignment.Center) {
-                            Text("+ Tambah Dana", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        }
+                    Surface(onClick = { topupGoal = g }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(42.dp)) {
+                        Box(Modifier.fillMaxSize(), Alignment.Center) { Text("+ Tambah Dana", color = White, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
                     }
-                    Surface(
-                        onClick = { editingGoal = g; showDialog = true },
-                        shape = CircleShape,
-                        color = Card2,
-                        modifier = Modifier.height(42.dp)
-                    ) {
-                        Box(Modifier.padding(horizontal = 16.dp), Alignment.Center) {
-                            Text("Ubah", color = White, fontSize = 13.sp)
-                        }
+                    Surface(onClick = { editingGoal = g; showDialog = true }, shape = CircleShape, color = Card2, modifier = Modifier.height(42.dp)) {
+                        Box(Modifier.padding(horizontal = 16.dp), Alignment.Center) { Text("Ubah", color = White, fontSize = 13.sp) }
                     }
                 }
             }
@@ -993,14 +942,10 @@ fun TargetScreen(
             onClose = { showDialog = false }
         )
     }
-
     topupGoal?.let { g ->
         TopupGoalDialog(
             goal = g,
-            onAdd = { addAmt ->
-                onSaveGoal(g.copy(saved = (g.saved + addAmt).coerceAtLeast(0L)))
-                topupGoal = null
-            },
+            onAdd = { addAmt -> onSaveGoal(g.copy(saved = (g.saved + addAmt).coerceAtLeast(0L))); topupGoal = null },
             onClose = { topupGoal = null }
         )
     }
@@ -1019,7 +964,7 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
         title = { Text(if (goal == null) "Target baru" else "Ubah target", color = White) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Nama target (mis. Dana Darurat)") }, singleLine = true)
+                OutlinedTextField(title, { title = it }, label = { Text("Nama target") }, singleLine = true)
                 OutlinedTextField(target, { target = it.filter(Char::isDigit) }, label = { Text("Nominal target (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                 OutlinedTextField(saved, { saved = it.filter(Char::isDigit) }, label = { Text("Sudah terkumpul (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                 OutlinedTextField(deadline, { deadline = it }, label = { Text("Batas waktu (yyyy-MM-dd)") }, singleLine = true)
@@ -1030,9 +975,7 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
                 val tg = target.toLongOrNull() ?: 0L
                 val sv = saved.toLongOrNull() ?: 0L
                 val dl = runCatching { LocalDate.parse(deadline).toString() }.getOrDefault(deadline.trim())
-                if (title.isNotBlank() && tg > 0) {
-                    onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, dl))
-                }
+                if (title.isNotBlank() && tg > 0) onSave(Goal(goal?.id ?: System.currentTimeMillis(), title.trim(), tg, sv, dl))
             }) { Text("Simpan", color = Blue) }
         },
         dismissButton = {
@@ -1054,24 +997,13 @@ fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Terkumpul saat ini: " + rp(goal.saved) + " / " + rp(goal.target), color = Muted, fontSize = 13.sp)
-                OutlinedTextField(
-                    amount,
-                    { amount = it.filter(Char::isDigit) },
-                    label = { Text("Nominal tambahan (Rp)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true
-                )
+                OutlinedTextField(amount, { amount = it.filter(Char::isDigit) }, label = { Text("Nominal tambahan (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
             }
         },
         confirmButton = {
-            TextButton({
-                val v = amount.toLongOrNull() ?: 0L
-                if (v > 0) onAdd(v)
-            }) { Text("Tambah", color = Blue) }
+            TextButton({ val v = amount.toLongOrNull() ?: 0L; if (v > 0) onAdd(v) }) { Text("Tambah", color = Blue) }
         },
-        dismissButton = {
-            TextButton(onClose) { Text("Batal", color = Muted) }
-        }
+        dismissButton = { TextButton(onClose) { Text("Batal", color = Muted) } }
     )
 }
 
@@ -1186,9 +1118,9 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
                         Text(c, color = White, fontSize = 14.sp)
                         Text(rp(v) + "  " + (v * 100 / s.exp) + "%", color = Muted, fontSize = 13.sp)
                     }
-                    Box(Modifier.padding(top = 6.dp, bottom = 12.dp).fillMaxWidth().height(8.dp).clip(CircleShape).background(Card2)) {
-                        Box(Modifier.fillMaxHeight().fillMaxWidth(v.toFloat() / s.exp).background(Blue))
-                    }
+                    Spacer(Modifier.height(6.dp))
+                    AnimatedBar(fraction = v.toFloat() / s.exp, fillColor = Blue, height = 8.dp)
+                    Spacer(Modifier.height(12.dp))
                 }
             }
         }
@@ -1199,52 +1131,24 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
 }
 
 @Composable
-fun ProfileScreen(
-    user: String,
-    avatarType: Int,
-    onAvatarChange: (Int) -> Unit,
-    syncing: Boolean,
-    url: String,
-    dev: Boolean,
-    onUrl: (String) -> Unit,
-    onDev: (Boolean) -> Unit,
-    onLogout: () -> Unit
-) {
-    var u by remember { mutableStateOf(url) }
-    var taps by remember { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("Profil", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Avatar(user, 64.dp, Blue, type = avatarType)
-                Column(Modifier.weight(1f)) {
-                    Text(user, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync otomatis aktif · tab \"$user\"",
-                            color = if (syncing) Lime else Muted,
-                            fontSize = 13.sp
-                        )
-                        if (syncing) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Lime)
-                    }
-                }
-            }
-        }
-        Panel {
-            Text("Pilih Avatar", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(12.dp))
+fun AvatarPopupDialog(user: String, currentType: Int, onSelect: (Int) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        title = { Text("Setup Avatar", color = White) },
+        text = {
             FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 AVATARS.forEachIndexed { idx, label ->
-                    val selected = avatarType == idx
+                    val selected = currentType == idx
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .clip(RoundedCornerShape(16.dp))
-                            .clickable { onAvatarChange(idx) }
+                            .clickable { onSelect(idx); onDismiss() }
                             .background(if (selected) Card2 else Color.Transparent)
                             .border(
                                 width = if (selected) 1.5.dp else 0.dp,
@@ -1253,16 +1157,65 @@ fun ProfileScreen(
                             )
                             .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
-                        Avatar(user, 48.dp, Blue, type = idx)
+                        Avatar(user, 50.dp, Blue, type = idx)
                         Spacer(Modifier.height(6.dp))
-                        Text(
-                            label,
-                            color = if (selected) Lime else Muted,
-                            fontSize = 11.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
-                        )
+                        Text(label, color = if (selected) Lime else Muted, fontSize = 11.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
                     }
                 }
+            }
+        },
+        confirmButton = { TextButton(onDismiss) { Text("Tutup", color = Blue) } }
+    )
+}
+
+@Composable
+fun SettingsScreen(
+    user: String, avatarType: Int, onAvatarChange: (Int) -> Unit,
+    syncing: Boolean, url: String, dev: Boolean,
+    onUrl: (String) -> Unit, onDev: (Boolean) -> Unit, onLogout: () -> Unit
+) {
+    var u by remember { mutableStateOf(url) }
+    var taps by remember { mutableStateOf(0) }
+    var showAvatarPopup by remember { mutableStateOf(false) }
+
+    Column(
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 120.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Settings", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
+        Panel {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.clickable { showAvatarPopup = true }) {
+                    Avatar(user, 64.dp, Blue, type = avatarType)
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).size(22.dp).clip(CircleShape).background(Lime),
+                        Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.Edit, "Ubah avatar", tint = BG, modifier = Modifier.size(12.dp))
+                    }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(user, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            if (syncing) "Menyinkronkan ke tab \"$user\"..." else "Sync otomatis aktif · tab \"$user\"",
+                            color = if (syncing) Lime else Muted, fontSize = 13.sp
+                        )
+                        AnimatedVisibility(visible = syncing, enter = fadeIn(), exit = fadeOut()) {
+                            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = Lime)
+                        }
+                    }
+                }
+            }
+        }
+        Panel(modifier = Modifier.clickable { showAvatarPopup = true }) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text("Setup Avatar", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(2.dp))
+                    Text("Gaya saat ini: ${AVATARS[avatarType]} · Ketuk untuk membuka popup", color = Muted, fontSize = 13.sp)
+                }
+                Pill(AVATARS[avatarType], Card2, Lime)
             }
         }
         if (dev) Panel {
@@ -1285,8 +1238,17 @@ fun ProfileScreen(
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
         Text(
-            "NoteCash v1.1", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+            "NoteCash v1.2", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clickable { taps++; if (taps >= 7 && !dev) { taps = 0; onDev(true) } }.padding(16.dp)
+        )
+    }
+
+    if (showAvatarPopup) {
+        AvatarPopupDialog(
+            user = user,
+            currentType = avatarType,
+            onSelect = onAvatarChange,
+            onDismiss = { showAvatarPopup = false }
         )
     }
 }
