@@ -1,8 +1,11 @@
-const ALLOWED = ['mnrdnn', 'lya'];
+// Kosongkan ALLOWED agar semua username valid boleh membuat tab sendiri.
+// Isi mis. ['mnrdnn','lya'] untuk membatasi.
+const ALLOWED = [];
 
 function tab_(u) {
   u = String(u || '').trim().toLowerCase();
-  if (ALLOWED.indexOf(u) < 0) throw new Error('user tidak dikenal');
+  if (!/^[a-z0-9_]{2,30}$/.test(u)) throw new Error('username tidak valid');
+  if (ALLOWED.length && ALLOWED.indexOf(u) < 0) throw new Error('username tidak diizinkan');
   const s = SpreadsheetApp.getActive();
   return s.getSheetByName(u) || s.insertSheet(u);
 }

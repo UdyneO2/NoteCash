@@ -40,6 +40,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -99,7 +102,8 @@ fun Typography.withFont(f: FontFamily) = Typography(
     labelLarge.copy(fontFamily = f), labelMedium.copy(fontFamily = f), labelSmall.copy(fontFamily = f)
 )
 
-val USERS = listOf("mnrdnn", "lya")
+const val DEFAULT_SHEET_URL = "https://s.id/notecash"
+val USER_RE = Regex("^[a-z0-9_]{2,30}$")
 val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya")
 val IN = listOf("Gaji", "Bonus", "Usaha", "Hadiah", "Lainnya")
 val ID = Locale("id", "ID")
@@ -140,8 +144,14 @@ fun labelOf(mode: Int, from: LocalDate, to: LocalDate): String = when (mode) {
 class Store(ctx: Context) {
     private val p = ctx.getSharedPreferences("catatan", 0)
     var url: String
-        get() = p.getString("url", "") ?: ""
+        get() = p.getString("url", "")?.takeIf { it.isNotBlank() } ?: DEFAULT_SHEET_URL
         set(v) { p.edit().putString("url", v).apply() }
+    var last: String?
+        get() = p.getString("last", null)
+        set(v) { p.edit().putString("last", v).apply() }
+    var dev: Boolean
+        get() = p.getBoolean("dev", false)
+        set(v) { p.edit().putBoolean("dev", v).apply() }
     var user: String?
         get() = p.getString("user", null)
         set(v) { p.edit().putString("user", v).apply() }
@@ -166,12 +176,28 @@ class Store(ctx: Context) {
 
 /** Sinkron ke Google Sheets lewat Web App Apps Script. Satu tab per username. */
 object Sheet {
+    /** Ikuti shortlink (mis. s.id) sampai URL Apps Script, karena POST kehilangan body jika diredirect. */
+    private fun resolve(raw: String): String {
+        var cur = if (raw.trim().startsWith("http")) raw.trim() else "https://" + raw.trim()
+        repeat(5) {
+            val host = URL(cur).host
+            if (host.endsWith("google.com") || host.endsWith("googleusercontent.com")) return cur
+            val c = URL(cur).openConnection() as HttpURLConnection
+            c.instanceFollowRedirects = false; c.connectTimeout = 10000; c.readTimeout = 10000
+            val code = c.responseCode
+            val loc = c.getHeaderField("Location")
+            c.disconnect()
+            if (code in 300..399 && loc != null) cur = URL(URL(cur), loc).toString() else return cur
+        }
+        return cur
+    }
+
     fun push(url: String, user: String, l: List<Tx>) {
         val rows = JSONArray()
         l.sortedBy { it.d }.forEach {
             rows.put(JSONArray().put(it.id.toString()).put(it.d).put(if (it.income) "Pemasukan" else "Pengeluaran").put(it.c).put(it.a).put(it.n))
         }
-        val c = URL(url).openConnection() as HttpURLConnection
+        val c = URL(resolve(url)).openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true
         c.setRequestProperty("Content-Type", "text/plain;charset=utf-8")
         c.outputStream.use { it.write(JSONObject().put("user", user).put("rows", rows).toString().toByteArray()) }
@@ -179,8 +205,9 @@ object Sheet {
     }
 
     fun pull(url: String, user: String): List<Tx> {
-        val sep = if (url.contains("?")) "&" else "?"
-        val c = URL(url + sep + "user=" + URLEncoder.encode(user, "UTF-8")).openConnection() as HttpURLConnection
+        val base = resolve(url)
+        val sep = if (base.contains("?")) "&" else "?"
+        val c = URL(base + sep + "user=" + URLEncoder.encode(user, "UTF-8")).openConnection() as HttpURLConnection
         val s = c.inputStream.bufferedReader().readText(); c.disconnect()
         val j = JSONArray(s)
         return (0 until j.length()).map { j.getJSONArray(it) }.filter { it.optString(0).isNotBlank() }.map {
@@ -209,7 +236,7 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize(), color = BG) {
                     var user by remember { mutableStateOf(st.user) }
                     val u = user
-                    if (u == null) LoginScreen { st.user = it; user = it }
+                    if (u == null) LoginScreen(st.last ?: "") { st.user = it; st.last = it; user = it }
                     else Main(st, u) { st.user = null; user = null }
                 }
             }
@@ -365,20 +392,26 @@ fun Chart(bi: List<Long>, be: List<Long>) {
 
 /* ---------- Layar ---------- */
 @Composable
-fun LoginScreen(onPick: (String) -> Unit) {
+fun LoginScreen(last: String, onLogin: (String) -> Unit) {
+    var name by remember { mutableStateOf(last) }
+    var err by remember { mutableStateOf(false) }
+    fun go() { val u = name.trim().lowercase(); if (USER_RE.matches(u)) onLogin(u) else err = true }
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(28.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("NoteCash", fontSize = 38.sp, fontWeight = FontWeight.SemiBold, color = White, letterSpacing = (-0.5).sp)
-        Text("Siapa yang mencatat hari ini?", color = Muted, modifier = Modifier.padding(top = 6.dp, bottom = 32.dp))
-        USERS.forEach { u ->
-            Surface(onClick = { onPick(u) }, shape = RoundedCornerShape(28.dp), color = CardC, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Row(Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(u, 52.dp, Blue)
-                    Column {
-                        Text(u, color = White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Tab sheet: $u", color = Muted, fontSize = 12.sp)
-                    }
-                }
-            }
+        Box(Modifier.size(72.dp).clip(RoundedCornerShape(22.dp)).background(Lime), Alignment.Center) {
+            Text("NC", color = BG, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        }
+        Text("NoteCash", fontSize = 36.sp, fontWeight = FontWeight.SemiBold, color = White, letterSpacing = (-0.5).sp, modifier = Modifier.padding(top = 16.dp))
+        Text("Masukkan username untuk membuka catatanmu", color = Muted, modifier = Modifier.padding(top = 6.dp, bottom = 28.dp))
+        OutlinedTextField(
+            name, { name = it; err = false }, Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(20.dp), isError = err,
+            label = { Text("Username") },
+            supportingText = { Text(if (err) "2-30 karakter: huruf kecil, angka, atau _" else "Setiap username punya tab sendiri di Google Sheets") },
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { go() })
+        )
+        Spacer(Modifier.height(16.dp))
+        Surface(onClick = { go() }, shape = CircleShape, color = Blue, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Masuk", color = White, fontWeight = FontWeight.Medium, fontSize = 16.sp) }
         }
     }
 }
@@ -398,6 +431,7 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
     var repMode by remember { mutableStateOf(1) }
     var chart by remember { mutableStateOf(st.chart) }
     var url by remember { mutableStateOf(st.url) }
+    var dev by remember { mutableStateOf(st.dev) }
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
 
@@ -423,12 +457,17 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
         }
     }
 
+    LaunchedEffect(user) {
+        if (all.isEmpty()) runCatching { withContext(Dispatchers.IO) { Sheet.pull(url, user) } }
+            .onSuccess { if (it.isNotEmpty()) { all = it; st.save(user, it) } }
+    }
+
     Box(Modifier.fillMaxSize().background(BG)) {
         when (tab) {
             0 -> HomeScreen(user, all, homeA, { homeA = it }, hide, { hide = !hide }, { searching = true }, { inc -> edit = null; formIncome = inc; showForm = true }) { edit = it; showForm = true }
             1 -> ReportScreen(all, repMode, { repMode = it }, repA, { repA = it }, chart) { edit = it; showForm = true }
-            else -> ProfileScreen(user, url, { url = it; st.url = it }, chart, { chart = it; st.chart = it }, { pushNow() },
-                { if (url.isBlank()) scope.launch { snack.showSnackbar("Isi URL Apps Script dulu") } else confirmPull = true }, onLogout)
+            else -> ProfileScreen(user, url, dev, { st.url = it.trim(); url = st.url }, chart, { chart = it; st.chart = it }, { pushNow() }, { confirmPull = true },
+                { on -> dev = on; st.dev = on; scope.launch { snack.showSnackbar(if (on) "Mode pengembang aktif" else "Mode pengembang dimatikan") } }, onLogout)
         }
         SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
         BottomBar(tab, { tab = it }, { edit = null; formIncome = false; showForm = true }, Modifier.align(Alignment.BottomCenter))
@@ -703,10 +742,11 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
 
 @Composable
 fun ProfileScreen(
-    user: String, url: String, onUrl: (String) -> Unit,
-    chart: Boolean, onChart: (Boolean) -> Unit, onPush: () -> Unit, onPull: () -> Unit, onLogout: () -> Unit
+    user: String, url: String, dev: Boolean, onUrl: (String) -> Unit,
+    chart: Boolean, onChart: (Boolean) -> Unit, onPush: () -> Unit, onPull: () -> Unit, onDev: (Boolean) -> Unit, onLogout: () -> Unit
 ) {
     var u by remember { mutableStateOf(url) }
+    var taps by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Text("Profil", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
         Panel {
@@ -729,9 +769,7 @@ fun ProfileScreen(
         }
         Panel {
             Text("Google Sheets", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(10.dp))
-            OutlinedTextField(u, { u = it; onUrl(it.trim()) }, Modifier.fillMaxWidth(), label = { Text("URL Apps Script (/exec)") })
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Text("Perubahan terkirim otomatis ke tab \"$user\".", color = Muted, fontSize = 13.sp)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -743,9 +781,29 @@ fun ProfileScreen(
                 }
             }
         }
+        if (dev) Panel {
+            Text("Mode pengembang", color = Lime, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(u, { u = it; onUrl(it) }, Modifier.fillMaxWidth(), label = { Text("URL Apps Script atau shortlink") })
+            Spacer(Modifier.height(8.dp))
+            Text("Bawaan: $DEFAULT_SHEET_URL", color = Muted, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(onClick = { u = DEFAULT_SHEET_URL; onUrl("") }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Setel ulang", color = White, fontWeight = FontWeight.Medium) }
+                }
+                Surface(onClick = { onDev(false) }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Matikan mode", color = White, fontWeight = FontWeight.Medium) }
+                }
+            }
+        }
         Surface(onClick = onLogout, shape = CircleShape, color = BG, border = BorderStroke(1.dp, Red.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth().height(52.dp)) {
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
+        Text(
+            "NoteCash v1.0", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().clickable { taps++; if (taps >= 7 && !dev) { taps = 0; onDev(true) } }.padding(16.dp)
+        )
     }
 }
 
