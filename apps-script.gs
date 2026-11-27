@@ -12,12 +12,20 @@ function tab_(u) {
 
 function doPost(e) {
   const d = JSON.parse(e.postData.contents);
+  const rows = Array.isArray(d.rows) ? d.rows : [];
   const sh = tab_(d.user);
-  sh.clear();
-  sh.getRange('A:B').setNumberFormat('@');
-  sh.getRange(1, 1, 1, 6).setValues([['ID', 'Tanggal', 'Tipe', 'Kategori', 'Jumlah', 'Catatan']]).setFontWeight('bold');
-  if (d.rows.length) sh.getRange(2, 1, d.rows.length, 6).setValues(d.rows);
-  sh.setFrozenRows(1);
+  // Kunci mencegah dua kiriman bersamaan saling menimpa tab yang sama.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    sh.clear();
+    sh.getRange('A:B').setNumberFormat('@');
+    sh.getRange(1, 1, 1, 6).setValues([['ID', 'Tanggal', 'Tipe', 'Kategori', 'Jumlah', 'Catatan']]).setFontWeight('bold');
+    if (rows.length) sh.getRange(2, 1, rows.length, 6).setValues(rows);
+    sh.setFrozenRows(1);
+  } finally {
+    lock.releaseLock();
+  }
   return ContentService.createTextOutput('ok');
 }
 

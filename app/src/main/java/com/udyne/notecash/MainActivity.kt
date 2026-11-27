@@ -4,7 +4,12 @@ package com.udyne.notecash
 
 import android.content.Context
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.os.SystemClock
+import android.util.Base64
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -27,6 +32,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,8 +54,10 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingCart
@@ -71,6 +79,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -86,7 +96,10 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -94,6 +107,10 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -116,15 +133,19 @@ val White = Color(0xFFFFFFFF)
 
 val AppFont: FontFamily = FontFamily.SansSerif
 
-fun Typography.withFont(f: FontFamily) = Typography(
-    displayLarge.copy(fontFamily = f), displayMedium.copy(fontFamily = f), displaySmall.copy(fontFamily = f),
-    headlineLarge.copy(fontFamily = f), headlineMedium.copy(fontFamily = f), headlineSmall.copy(fontFamily = f),
-    titleLarge.copy(fontFamily = f), titleMedium.copy(fontFamily = f), titleSmall.copy(fontFamily = f),
-    bodyLarge.copy(fontFamily = f), bodyMedium.copy(fontFamily = f), bodySmall.copy(fontFamily = f),
-    labelLarge.copy(fontFamily = f), labelMedium.copy(fontFamily = f), labelSmall.copy(fontFamily = f)
+fun Typography.withFont(f: FontFamily) = copy(
+    displayLarge = displayLarge.copy(fontFamily = f), displayMedium = displayMedium.copy(fontFamily = f), displaySmall = displaySmall.copy(fontFamily = f),
+    headlineLarge = headlineLarge.copy(fontFamily = f), headlineMedium = headlineMedium.copy(fontFamily = f), headlineSmall = headlineSmall.copy(fontFamily = f),
+    titleLarge = titleLarge.copy(fontFamily = f), titleMedium = titleMedium.copy(fontFamily = f), titleSmall = titleSmall.copy(fontFamily = f),
+    bodyLarge = bodyLarge.copy(fontFamily = f), bodyMedium = bodyMedium.copy(fontFamily = f), bodySmall = bodySmall.copy(fontFamily = f),
+    labelLarge = labelLarge.copy(fontFamily = f), labelMedium = labelMedium.copy(fontFamily = f), labelSmall = labelSmall.copy(fontFamily = f)
 )
 
 const val DEFAULT_SHEET_URL = "https://s.id/notecash"
+const val PIN_LEN = 6
+const val LOCK_GRACE_MS = 30_000L
+const val MAX_PIN_TRIES = 5
+const val PIN_BLOCK_MS = 30_000L
 val USER_RE = Regex("^[a-z0-9_]{2,30}$")
 val OUT = listOf("Makan", "Transport", "Belanja", "Tagihan", "Hiburan", "Kesehatan", "Lainnya", "Target")
 val IN = listOf("Gaji", "Bonus", "Usaha", "Hadiah", "Lainnya")
@@ -183,6 +204,35 @@ class Store(ctx: Context) {
     var user: String?
         get() = p.getString("user", null)
         set(v) { p.edit().putString("user", v).apply() }
+
+    var bio: Boolean
+        get() = p.getBoolean("bio", false)
+        set(v) { p.edit().putBoolean("bio", v).apply() }
+
+    private fun pinHash(pin: String, salt: ByteArray): ByteArray =
+        SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(PBEKeySpec(pin.toCharArray(), salt, 20000, 256)).encoded
+
+    fun hasPin(): Boolean = p.contains("pin_hash")
+
+    fun setPin(pin: String) {
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        p.edit()
+            .putString("pin_salt", Base64.encodeToString(salt, Base64.NO_WRAP))
+            .putString("pin_hash", Base64.encodeToString(pinHash(pin, salt), Base64.NO_WRAP))
+            .apply()
+    }
+
+    fun checkPin(pin: String): Boolean {
+        val salt = p.getString("pin_salt", null)?.let { Base64.decode(it, Base64.NO_WRAP) } ?: return false
+        val want = p.getString("pin_hash", null)?.let { Base64.decode(it, Base64.NO_WRAP) } ?: return false
+        return MessageDigest.isEqual(want, pinHash(pin, salt))
+    }
+
+    fun clearPin() { p.edit().remove("pin_hash").remove("pin_salt").remove("bio").apply() }
+
+    /** True bila ada perubahan lokal yang belum berhasil dikirim ke Sheet. */
+    fun isDirty(u: String): Boolean = p.getBoolean("dirty_" + u, false)
+    fun setDirty(u: String, v: Boolean) { p.edit().putBoolean("dirty_" + u, v).apply() }
 
     fun avatarOf(u: String): Int = p.getInt("av_" + u, 0).coerceIn(0, AVATARS.lastIndex)
     fun setAvatar(u: String, idx: Int) { p.edit().putInt("av_" + u, idx.coerceIn(0, AVATARS.lastIndex)).apply() }
@@ -283,14 +333,29 @@ object Sheet {
     }
 }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+    private lateinit var st: Store
+    private var locked by mutableStateOf(false)
+    private var stoppedAt = 0L
+
+    override fun onStart() {
+        super.onStart()
+        if (stoppedAt > 0 && st.hasPin() && SystemClock.elapsedRealtime() - stoppedAt > LOCK_GRACE_MS) locked = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        stoppedAt = SystemClock.elapsedRealtime()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
-        val st = Store(this)
+        st = Store(this)
+        locked = st.hasPin()
         val scheme = darkColorScheme(
             primary = Blue, onPrimary = White, primaryContainer = Color(0xFF0A5E94), onPrimaryContainer = White,
             secondary = Lime, onSecondary = BG, secondaryContainer = Color(0xFF14405E), onSecondaryContainer = White,
@@ -302,16 +367,20 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = scheme, typography = Typography().withFont(AppFont)) {
                 Surface(Modifier.fillMaxSize(), color = BG) {
                     var user by remember { mutableStateOf(st.user) }
-                    AnimatedContent(
-                        targetState = user,
-                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(240)) },
-                        label = "auth_transition"
-                    ) { current ->
-                        if (current == null) {
-                            LoginScreen(st.last ?: "") { st.user = it; st.last = it; user = it }
-                        } else {
-                            Main(st, current) { st.user = null; user = null }
+                    Box(Modifier.fillMaxSize()) {
+                        AnimatedContent(
+                            targetState = user,
+                            transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(240)) },
+                            label = "auth_transition"
+                        ) { current ->
+                            if (current == null) {
+                                LoginScreen(st.last ?: "") { st.user = it; st.last = it; user = it }
+                            } else {
+                                Main(st, current) { st.user = null; user = null }
+                            }
                         }
+                        // Kunci menutupi layar tanpa membuang state di bawahnya (draf form, tab aktif).
+                        if (locked) LockScreen(st) { locked = false }
                     }
                 }
             }
@@ -471,7 +540,7 @@ fun CalendarDatePicker(
                 TextButton(
                     onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
-                            val picked = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+                            val picked = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
                             onDateSelected(picked.toString())
                         }
                         open = false
@@ -671,7 +740,7 @@ fun BottomBar(tab: Int, onTab: (Int) -> Unit, onAdd: () -> Unit, modifier: Modif
                     Box(Modifier.size(44.dp), Alignment.Center) { Icon(Icons.Rounded.Add, "Catat", tint = BG) }
                 }
                 NavItem(tab == 2, Icons.Rounded.Flag, "Target") { onTab(2) }
-                NavItem(tab == 3, Icons.Rounded.Settings, "Settings") { onTab(3) }
+                NavItem(tab == 3, Icons.Rounded.Settings, "Pengaturan") { onTab(3) }
             }
         }
     }
@@ -755,7 +824,9 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
     var showForm by remember { mutableStateOf(false) }
     var hide by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
-    var syncing by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(0) }
+    val syncing = busy > 0
+    val syncLock = remember { Mutex() }
     var homeA by remember { mutableStateOf(LocalDate.now()) }
     var repA by remember { mutableStateOf(LocalDate.now()) }
     var repMode by remember { mutableStateOf(1) }
@@ -766,11 +837,17 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
 
     fun autoPush(newTxs: List<Tx>, newGoals: List<Goal>) {
         if (url.isBlank()) return
+        st.setDirty(user, true)
         scope.launch {
-            syncing = true
-            val r = runCatching { withContext(Dispatchers.IO) { Sheet.pushAll(url, user, newTxs, newGoals) } }
-            syncing = false
-            if (r.isFailure) snack.showSnackbar("Gagal sinkron otomatis ke Sheet")
+            busy++
+            // Mutex menjaga urutan kirim: perubahan lama tidak boleh menimpa yang baru.
+            val r = runCatching { syncLock.withLock { withContext(Dispatchers.IO) { Sheet.pushAll(url, user, newTxs, newGoals) } } }
+            busy--
+            if (r.isSuccess) {
+                if (all == newTxs && goals == newGoals) st.setDirty(user, false)
+            } else {
+                snack.showSnackbar("Gagal sinkron ke Sheet, akan dicoba lagi nanti")
+            }
         }
     }
 
@@ -785,19 +862,35 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
     fun autoPull(silent: Boolean = false) {
         if (url.isBlank()) return
         scope.launch {
-            syncing = true
-            runCatching { withContext(Dispatchers.IO) { Sheet.pullAll(url, user) } }
-                .onSuccess { bundle ->
-                    if (bundle.txs.isNotEmpty() || bundle.goals.isNotEmpty()) {
+            busy++
+            val localTx = all
+            val localGoals = goals
+            val dirty = st.isDirty(user)
+            // Jika ada perubahan lokal yang belum terkirim, kirim dulu. Menarik data lebih dulu akan menimpanya.
+            val r = runCatching {
+                syncLock.withLock {
+                    withContext(Dispatchers.IO) {
+                        val b = if (dirty) null else Sheet.pullAll(url, user)
+                        if (b == null || (b.txs.isEmpty() && b.goals.isEmpty())) {
+                            if (dirty || localTx.isNotEmpty() || localGoals.isNotEmpty()) Sheet.pushAll(url, user, localTx, localGoals)
+                            null
+                        } else b
+                    }
+                }
+            }
+            busy--
+            r.onSuccess { bundle ->
+                if (bundle != null) {
+                    // Lewati bila pengguna mengubah data selama proses tarik berjalan.
+                    if (!st.isDirty(user)) {
                         all = bundle.txs; st.save(user, bundle.txs)
                         goals = bundle.goals; st.saveGoals(user, bundle.goals)
-                    } else if (all.isNotEmpty() || goals.isNotEmpty()) {
-                        withContext(Dispatchers.IO) { Sheet.pushAll(url, user, all, goals) }
                     }
-                    if (!silent) snack.showSnackbar("Data tersinkron")
+                } else if (all == localTx && goals == localGoals) {
+                    st.setDirty(user, false)
                 }
-                .onFailure { if (!silent) snack.showSnackbar("Gagal sinkron dengan Sheet") }
-            syncing = false
+                if (!silent) snack.showSnackbar("Data tersinkron")
+            }.onFailure { if (!silent) snack.showSnackbar("Gagal sinkron dengan Sheet") }
         }
     }
 
@@ -832,7 +925,7 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
                         onDeleteGoal = { id -> commitGoals(goals.filter { it.id != id }) }
                     )
                     else -> SettingsScreen(
-                        user = user, avatarType = avatarType,
+                        st = st, user = user, avatarType = avatarType,
                         onAvatarChange = { avatarType = it; st.setAvatar(user, it) },
                         syncing = syncing, url = url, dev = dev,
                         onUrl = { st.url = it.trim(); url = st.url },
@@ -929,7 +1022,8 @@ fun HomeScreen(
                             Box(Modifier.size(22.dp).clip(CircleShape).background(if (net >= 0) Green else Red), Alignment.Center) {
                                 Icon(if (net >= 0) Icons.Rounded.ArrowUpward else Icons.Rounded.ArrowDownward, null, tint = White, modifier = Modifier.size(14.dp))
                             }
-                            Text(if (net >= 0) "Plus " + rp(net) + " bulan ini" else "Minus " + rp(-net) + " bulan ini", color = Muted, fontSize = 13.sp)
+                            val netText = if (hide) "••••••" else rp(Math.abs(net))
+                            Text((if (net >= 0) "Plus " else "Minus ") + netText + " di " + labelOf(1, from, to), color = Muted, fontSize = 13.sp)
                         }
                     }
                 }
@@ -985,7 +1079,11 @@ fun HomeScreen(
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (sp.exp > 0) "Pengeluaran " + (if (dE >= 0) "naik " else "turun ") + Math.abs(dE * 100 / sp.exp) + "% dari bulan lalu" else "Belum ada pembanding bulan lalu",
+                    when {
+                        sp.exp <= 0 -> "Belum ada pembanding bulan lalu"
+                        dE == 0L -> "Pengeluaran sama dengan bulan lalu"
+                        else -> "Pengeluaran " + (if (dE > 0) "naik " else "turun ") + Math.abs(dE * 100 / sp.exp) + "% dari bulan lalu"
+                    },
                     color = Muted, fontSize = 13.sp
                 )
                 Spacer(Modifier.height(14.dp))
@@ -1458,21 +1556,213 @@ fun AvatarPopupDialog(user: String, currentType: Int, onSelect: (Int) -> Unit, o
     )
 }
 
+/* ---------- Kunci aplikasi (PIN + sidik jari) ---------- */
+fun canBio(ctx: Context): Boolean =
+    BiometricManager.from(ctx).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+
+fun promptBio(act: FragmentActivity, onOk: () -> Unit) {
+    val info = BiometricPrompt.PromptInfo.Builder()
+        .setTitle("Buka Note Cash")
+        .setNegativeButtonText("Pakai PIN")
+        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        .build()
+    BiometricPrompt(act, ContextCompat.getMainExecutor(act), object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { onOk() }
+    }).authenticate(info)
+}
+
+/** Titik PIN + keypad. [onDone] dipanggil begitu digit ke-[PIN_LEN] diketik, lalu isian dikosongkan. */
+@Composable
+fun PinEntry(title: String, hint: String, error: String, enabled: Boolean, onDone: (String) -> Unit, onBio: (() -> Unit)? = null) {
+    var pin by remember { mutableStateOf("") }
+    val keys = listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("bio", "0", "del"))
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(title, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(6.dp))
+        Text(if (error.isNotEmpty()) error else hint, color = if (error.isNotEmpty()) Red else Muted, fontSize = 13.sp, textAlign = TextAlign.Center, minLines = 2)
+        Spacer(Modifier.height(18.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            repeat(PIN_LEN) { i -> Box(Modifier.size(14.dp).clip(CircleShape).background(if (i < pin.length) Lime else Card2)) }
+        }
+        Spacer(Modifier.height(24.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            keys.forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { k ->
+                        val blank = k == "bio" && onBio == null
+                        Surface(
+                            onClick = {
+                                when (k) {
+                                    "del" -> pin = pin.dropLast(1)
+                                    "bio" -> onBio?.invoke()
+                                    else -> if (pin.length < PIN_LEN) {
+                                        val next = pin + k
+                                        if (next.length == PIN_LEN) { pin = ""; onDone(next) } else pin = next
+                                    }
+                                }
+                            },
+                            enabled = enabled && !blank,
+                            shape = CircleShape,
+                            color = if (blank) Color.Transparent else if (k == "del" || k == "bio") Card2 else CardC,
+                            modifier = Modifier.size(68.dp)
+                        ) {
+                            Box(Modifier.fillMaxSize(), Alignment.Center) {
+                                when {
+                                    blank -> {}
+                                    k == "del" -> Icon(Icons.AutoMirrored.Rounded.Backspace, "Hapus digit", tint = White, modifier = Modifier.size(22.dp))
+                                    k == "bio" -> Icon(Icons.Rounded.Fingerprint, "Buka dengan sidik jari", tint = Lime, modifier = Modifier.size(26.dp))
+                                    else -> Text(k, color = White, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LockScreen(st: Store, onUnlock: () -> Unit) {
+    val ctx = LocalContext.current
+    val act = ctx as? FragmentActivity
+    val bioOk = st.bio && canBio(ctx)
+    var fails by remember { mutableStateOf(0) }
+    var blockedUntil by remember { mutableStateOf(0L) }
+    var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    var err by remember { mutableStateOf("") }
+    val waitSec = ((blockedUntil - now + 999) / 1000).coerceAtLeast(0L)
+
+    BackHandler { act?.moveTaskToBack(true) }
+    LaunchedEffect(Unit) { if (bioOk && act != null) promptBio(act, onUnlock) }
+    LaunchedEffect(blockedUntil) {
+        while (SystemClock.elapsedRealtime() < blockedUntil) { now = SystemClock.elapsedRealtime(); delay(500) }
+        now = SystemClock.elapsedRealtime()
+        if (blockedUntil > 0) err = ""
+    }
+
+    Column(
+        Modifier.fillMaxSize().background(BG).pointerInput(Unit) { detectTapGestures { } }.systemBarsPadding().padding(28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(Modifier.size(56.dp).clip(RoundedCornerShape(18.dp)).background(Lime), Alignment.Center) {
+            Icon(Icons.Rounded.Lock, null, tint = BG, modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.height(20.dp))
+        PinEntry(
+            title = "Note Cash terkunci",
+            hint = "Masukkan PIN $PIN_LEN angka",
+            error = if (waitSec > 0) "Terlalu banyak percobaan. Coba lagi dalam $waitSec detik" else err,
+            enabled = waitSec == 0L,
+            onDone = { entered ->
+                if (st.checkPin(entered)) onUnlock()
+                else {
+                    fails++
+                    err = "PIN salah"
+                    if (fails >= MAX_PIN_TRIES) {
+                        fails = 0
+                        now = SystemClock.elapsedRealtime()
+                        blockedUntil = now + PIN_BLOCK_MS
+                    }
+                }
+            },
+            onBio = if (bioOk && act != null) ({ promptBio(act, onUnlock) }) else null
+        )
+    }
+}
+
+@Composable
+fun SecurityPanel(st: Store) {
+    val ctx = LocalContext.current
+    val bioAvailable = remember { canBio(ctx) }
+    var lockOn by remember { mutableStateOf(st.hasPin()) }
+    var bioOn by remember { mutableStateOf(st.bio) }
+    // 0 tutup, 1 verifikasi untuk mematikan, 2 verifikasi untuk ganti, 3 PIN baru, 4 ulangi PIN baru
+    var flow by remember { mutableStateOf(0) }
+    var firstPin by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf("") }
+    fun close() { flow = 0; firstPin = ""; err = "" }
+
+    Panel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconCircle(Icons.Rounded.Lock)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Kunci aplikasi", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(if (lockOn) "Aktif, PIN $PIN_LEN angka" else "Minta PIN setiap membuka aplikasi", color = Muted, fontSize = 12.sp)
+            }
+            Switch(checked = lockOn, onCheckedChange = { on -> err = ""; flow = if (on) 3 else 1 })
+        }
+        if (lockOn) {
+            Spacer(Modifier.height(14.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Buka dengan sidik jari", color = White, fontSize = 14.sp)
+                    if (!bioAvailable) Text("Belum ada sidik jari terdaftar di perangkat ini", color = Muted, fontSize = 12.sp)
+                }
+                Switch(checked = bioOn && bioAvailable, enabled = bioAvailable, onCheckedChange = { bioOn = it; st.bio = it })
+            }
+            Spacer(Modifier.height(10.dp))
+            Surface(onClick = { err = ""; flow = 2 }, shape = CircleShape, color = Card2, modifier = Modifier.fillMaxWidth().height(44.dp)) {
+                Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Ubah PIN", color = White, fontWeight = FontWeight.Medium, fontSize = 14.sp) }
+            }
+        }
+    }
+
+    if (flow != 0) {
+        AlertDialog(
+            onDismissRequest = { close() },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = CardC,
+            text = {
+                PinEntry(
+                    title = when (flow) {
+                        1 -> "Nonaktifkan kunci"
+                        2 -> "Masukkan PIN lama"
+                        3 -> "Buat PIN baru"
+                        else -> "Ulangi PIN baru"
+                    },
+                    hint = when (flow) {
+                        1, 2 -> "Masukkan PIN saat ini"
+                        3 -> "Pilih $PIN_LEN angka yang mudah kamu ingat"
+                        else -> "Ketik PIN yang sama sekali lagi"
+                    },
+                    error = err,
+                    enabled = true,
+                    onDone = { entered ->
+                        when (flow) {
+                            1 -> if (st.checkPin(entered)) { st.clearPin(); lockOn = false; bioOn = false; close() } else err = "PIN salah"
+                            2 -> if (st.checkPin(entered)) { err = ""; flow = 3 } else err = "PIN salah"
+                            3 -> { firstPin = entered; err = ""; flow = 4 }
+                            else -> if (entered == firstPin) { st.setPin(entered); lockOn = true; close() } else { err = "PIN tidak sama, ulangi dari awal"; firstPin = ""; flow = 3 }
+                        }
+                    }
+                )
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { close() }) { Text("Batal", color = Muted) } }
+        )
+    }
+}
+
 @Composable
 fun SettingsScreen(
-    user: String, avatarType: Int, onAvatarChange: (Int) -> Unit,
+    st: Store, user: String, avatarType: Int, onAvatarChange: (Int) -> Unit,
     syncing: Boolean, url: String, dev: Boolean,
     onUrl: (String) -> Unit, onDev: (Boolean) -> Unit, onLogout: () -> Unit
 ) {
     var u by remember { mutableStateOf(url) }
     var taps by remember { mutableStateOf(0) }
     var showAvatarPopup by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
     Column(
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("Settings", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
+        Text("Pengaturan", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
         Panel {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Box(Modifier.clip(CircleShape).clickable { showAvatarPopup = true }) {
@@ -1490,7 +1780,7 @@ fun SettingsScreen(
                         val syncStatusText = if (syncing) {
                             "Menyinkronkan ke tab '" + user + "'..."
                         } else {
-                            "Sync otomatis aktif · tab '" + user + "'"
+                            "Sinkron otomatis aktif · tab '" + user + "'"
                         }
                         Text(
                             text = syncStatusText,
@@ -1504,6 +1794,7 @@ fun SettingsScreen(
                 }
             }
         }
+        SecurityPanel(st)
         if (dev) Panel {
             Text("Mode pengembang", color = Lime, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(10.dp))
@@ -1516,7 +1807,7 @@ fun SettingsScreen(
                     Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Setel ulang", color = White, fontWeight = FontWeight.Medium) }
                 }
                 Surface(onClick = { onDev(false) }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Close", color = White, fontWeight = FontWeight.Medium) }
+                    Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Tutup", color = White, fontWeight = FontWeight.Medium) }
                 }
             }
         }
@@ -1524,7 +1815,7 @@ fun SettingsScreen(
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
         Text(
-            "Note Cash v1.2", color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
+            "Note Cash v" + version, color = Muted, fontSize = 12.sp, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().clickable { taps++; if (taps >= 7 && !dev) { taps = 0; onDev(true) } }.padding(16.dp)
         )
     }

@@ -12,3 +12,5 @@
 -keepattributes SourceFile,LineNumberTable
 -keep class kotlin.Metadata { *; }
 -dontwarn kotlinx.coroutines.**
+
+# BiometricPrompt memakai fragment & callback; aturan consumer dari library sudah cukup.
