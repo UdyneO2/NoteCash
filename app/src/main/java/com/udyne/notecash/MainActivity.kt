@@ -11,8 +11,6 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -57,12 +55,14 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.BrightnessAuto
+import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.ShoppingCart
@@ -204,7 +204,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putString("user", v).apply() }
 
     var theme: Int
-        get() = p.getInt("theme", THEME_DARK)
+        get() = p.getInt("theme", THEME_SYSTEM)
         set(v) { p.edit().putInt("theme", v).apply() }
 
     var bio: Boolean
@@ -363,7 +363,6 @@ class MainActivity : FragmentActivity() {
         setContent {
             val pal = CurPal
             val scheme = remember(pal) { palScheme(pal) }
-            val backdrop = rememberLayerBackdrop()
             LaunchedEffect(pal.dark) {
                 this@MainActivity.enableEdgeToEdge(
                     statusBarStyle = if (pal.dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT) else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
@@ -371,12 +370,8 @@ class MainActivity : FragmentActivity() {
                 )
             }
             MaterialTheme(colorScheme = scheme, typography = Typography().withFont(AppFont)) {
-                val dialogHost = remember { DialogHostState() }
-                CompositionLocalProvider(LocalBackdrop provides (if (pal.glass) backdrop else null), LocalDialogHost provides dialogHost) {
-                    Box(Modifier.fillMaxSize()) {
-                        // Latar yang dibiaskan kartu kaca. Hanya digambar saat tema Liquid Glass aktif.
-                        if (pal.glass) Box(Modifier.fillMaxSize().layerBackdrop(backdrop).drawBehind { drawGlassBackdrop() })
-                            Surface(Modifier.fillMaxSize(), color = if (pal.glass) Color.Transparent else BG) {
+                Box(Modifier.fillMaxSize()) {
+                            Surface(Modifier.fillMaxSize(), color = BG) {
                                 var user by remember { mutableStateOf(st.user) }
                                 Box(Modifier.fillMaxSize()) {
                                     AnimatedContent(
@@ -394,8 +389,6 @@ class MainActivity : FragmentActivity() {
                                     if (locked) LockScreen(st) { locked = false }
                                 }
                             }
-                        DialogHost(dialogHost)
-                    }
                 }
             }
         }
@@ -405,9 +398,7 @@ class MainActivity : FragmentActivity() {
 /* ---------- Komponen dasar ---------- */
 @Composable
 fun Panel(modifier: Modifier = Modifier, color: Color = CardC, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(28.dp)
-    val glassOn = LocalBackdrop.current != null
-    Surface(modifier.fillMaxWidth().glass(shape, 28f), shape = shape, color = if (glassOn) Color.Transparent else color) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = color) {
         Column(Modifier.padding(20.dp), content = content)
     }
 }
@@ -707,10 +698,13 @@ fun PeriodNav(label: String, onPrev: () -> Unit, onNext: () -> Unit) {
 
 @Composable
 fun Segmented(options: List<String>, sel: Int, onSel: (Int) -> Unit) {
-    val glassOn = LocalBackdrop.current != null
-    Surface(Modifier.fillMaxWidth().glass(CircleShape, 23f, useLens = false), shape = CircleShape, color = if (glassOn) Color.Transparent else Card2) {
-        SlidingSelector(count = options.size, sel = sel, onSel = onSel, modifier = Modifier.fillMaxWidth().height(46.dp)) { i, active ->
-            Text(options[i], color = if (active) White else Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+    Surface(Modifier.fillMaxWidth(), shape = CircleShape, color = Card2) {
+        Row(Modifier.padding(4.dp)) {
+            options.forEachIndexed { i, t ->
+                Surface(onClick = { onSel(i) }, shape = CircleShape, color = if (i == sel) BG else Color.Transparent, modifier = Modifier.weight(1f)) {
+                    Text(t, color = if (i == sel) White else Muted, fontSize = 14.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                }
+            }
         }
     }
 }
@@ -718,9 +712,7 @@ fun Segmented(options: List<String>, sel: Int, onSel: (Int) -> Unit) {
 @Composable
 fun TxRow(t: Tx, showDate: Boolean = false, onClick: () -> Unit) {
     val sub = if (showDate) listOf(t.d, t.n).filter { it.isNotBlank() }.joinToString(" · ") else t.n.ifBlank { "Tanpa catatan" }
-    val shape = RoundedCornerShape(20.dp)
-    val glassOn = LocalBackdrop.current != null
-    Surface(onClick = onClick, shape = shape, color = if (glassOn) Color.Transparent else CardC, modifier = Modifier.fillMaxWidth().glass(shape, 20f, useLens = false)) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = CardC, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Avatar(t.c, 42.dp, type = 0)
             Column(Modifier.weight(1f)) {
@@ -746,16 +738,8 @@ fun NavItem(sel: Boolean, icon: ImageVector, label: String, onClick: () -> Unit)
 
 @Composable
 fun BottomBar(tab: Int, onTab: (Int) -> Unit, onAdd: () -> Unit, modifier: Modifier) {
-    if (LocalBackdrop.current != null) { GlassTabBar(tab, onTab, onAdd, modifier); return }
     Box(modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp), Alignment.Center) {
-        val glassOn = LocalBackdrop.current != null
-        Surface(
-            shape = CircleShape,
-            color = if (glassOn) Color.Transparent else CardC,
-            border = if (glassOn) null else BorderStroke(1.dp, Card2),
-            shadowElevation = if (glassOn) 0.dp else 8.dp,
-            modifier = Modifier.glass(CircleShape, 28f)
-        ) {
+        Surface(shape = CircleShape, color = CardC, border = BorderStroke(1.dp, Card2), shadowElevation = 8.dp) {
             Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 NavItem(tab == 0, Icons.Rounded.Home, "Beranda") { onTab(0) }
                 NavItem(tab == 1, Icons.Rounded.BarChart, "Laporan") { onTab(1) }
@@ -830,7 +814,7 @@ fun LoginScreen(last: String, onLogin: (String) -> Unit) {
             keyboardActions = KeyboardActions(onDone = { go() })
         )
         Spacer(Modifier.height(16.dp))
-        LiquidButton(onClick = { go() }, shape = CircleShape, color = Blue, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+        Surface(onClick = { go() }, shape = CircleShape, color = Blue, modifier = Modifier.fillMaxWidth().height(52.dp)) {
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Masuk", color = OnBlue, fontWeight = FontWeight.Medium, fontSize = 15.sp) }
         }
     }
@@ -919,7 +903,7 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
 
     LaunchedEffect(user) { autoPull(silent = true) }
 
-    Box(Modifier.fillMaxSize().themeBg()) {
+    Box(Modifier.fillMaxSize().background(BG)) {
         AnimatedContent(
             targetState = tab,
             transitionSpec = {
@@ -935,6 +919,13 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
                         user = user, avatarType = avatarType, syncing = syncing, all = all,
                         anchor = homeA, onAnchor = { homeA = it }, hide = hide, onHide = { hide = !hide },
                         onSync = { autoPull(silent = false) }, onSearch = { searching = true },
+                        onTheme = {
+                            val next = nextTheme(ThemeState.id)
+                            ThemeState.id = next
+                            st.theme = next
+                            snack.currentSnackbarData?.dismiss()
+                            scope.launch { snack.showSnackbar("Tema: " + themeLabel(next)) }
+                        },
                         onAdd = { inc -> edit = null; formIncome = inc; showForm = true },
                         onEdit = { edit = it; showForm = true }
                     )
@@ -992,7 +983,7 @@ fun Main(st: Store, user: String, onLogout: () -> Unit) {
 @Composable
 fun HomeScreen(
     user: String, avatarType: Int, syncing: Boolean, all: List<Tx>, anchor: LocalDate, onAnchor: (LocalDate) -> Unit,
-    hide: Boolean, onHide: () -> Unit, onSync: () -> Unit, onSearch: () -> Unit, onAdd: (Boolean) -> Unit, onEdit: (Tx) -> Unit
+    hide: Boolean, onHide: () -> Unit, onSync: () -> Unit, onSearch: () -> Unit, onTheme: () -> Unit, onAdd: (Boolean) -> Unit, onEdit: (Tx) -> Unit
 ) {
     val (from, to) = rangeOf(1, anchor)
     val (pf, pt) = rangeOf(1, shiftOf(1, anchor, -1))
@@ -1007,7 +998,7 @@ fun HomeScreen(
     val greet = when { hour < 11 -> "Selamat pagi"; hour < 15 -> "Selamat siang"; hour < 18 -> "Selamat sore"; else -> "Selamat malam" }
     val dE = s.exp - sp.exp
 
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().scrollEdges().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Avatar(user, 44.dp, type = avatarType)
@@ -1020,11 +1011,20 @@ fun HomeScreen(
                         }
                     }
                 }
-                LiquidButton(onClick = onSync, enabled = !syncing, shape = CircleShape, color = Card2) {
+                Surface(onClick = onSync, enabled = !syncing, shape = CircleShape, color = Card2) {
                     Icon(Icons.Rounded.Sync, "Sinkronkan", tint = if (syncing) Lime else White, modifier = Modifier.padding(11.dp).size(22.dp))
                 }
-                LiquidButton(onClick = onSearch, shape = CircleShape, color = Card2) {
+                Surface(onClick = onSearch, shape = CircleShape, color = Card2) {
                     Icon(Icons.Rounded.Search, "Cari transaksi", tint = White, modifier = Modifier.padding(11.dp).size(22.dp))
+                }
+                Surface(onClick = onTheme, shape = CircleShape, color = Card2) {
+                    val themeIcon = when (ThemeState.id) {
+                        THEME_LIGHT -> Icons.Rounded.LightMode
+                        THEME_DARK -> Icons.Rounded.DarkMode
+                        THEME_AMOLED -> Icons.Rounded.Contrast
+                        else -> Icons.Rounded.BrightnessAuto
+                    }
+                    Icon(themeIcon, "Tema: " + themeLabel(ThemeState.id), tint = White, modifier = Modifier.padding(11.dp).size(22.dp))
                 }
             }
         }
@@ -1034,7 +1034,7 @@ fun HomeScreen(
                     IconCircle(Icons.Rounded.AccountBalanceWallet)
                     Spacer(Modifier.width(10.dp))
                     Text("Saldo saya", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                    LiquidButton(onClick = onHide, shape = CircleShape, color = Card2) {
+                    Surface(onClick = onHide, shape = CircleShape, color = Card2) {
                         Icon(if (hide) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "Sembunyikan saldo", tint = Muted, modifier = Modifier.padding(9.dp).size(20.dp))
                     }
                 }
@@ -1052,12 +1052,12 @@ fun HomeScreen(
                 }
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LiquidButton(onClick = { onAdd(true) }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(52.dp)) {
+                    Surface(onClick = { onAdd(true) }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(52.dp)) {
                         Row(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Add, null, tint = OnBlue); Spacer(Modifier.width(6.dp)); Text("Pemasukan", color = OnBlue, fontWeight = FontWeight.Medium)
                         }
                     }
-                    LiquidButton(onClick = { onAdd(false) }, shape = CircleShape, color = BG, border = BorderStroke(1.dp, Card2), modifier = Modifier.weight(1f).height(52.dp)) {
+                    Surface(onClick = { onAdd(false) }, shape = CircleShape, color = BG, border = BorderStroke(1.dp, Card2), modifier = Modifier.weight(1f).height(52.dp)) {
                         Row(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterVertically) {
                             Icon(Icons.Rounded.ArrowUpward, null, tint = White); Spacer(Modifier.width(6.dp)); Text("Pengeluaran", color = White, fontWeight = FontWeight.Medium)
                         }
@@ -1149,7 +1149,7 @@ fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit
                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Lime)
                         }
                     }
-                    LiquidButton(onClick = { editingGoal = null; showDialog = true }, shape = CircleShape, color = Blue) {
+                    Surface(onClick = { editingGoal = null; showDialog = true }, shape = CircleShape, color = Blue) {
                         Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.Rounded.Add, null, tint = OnBlue, modifier = Modifier.size(18.dp))
                             Text("Target baru", color = OnBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
@@ -1206,10 +1206,10 @@ fun TargetScreen(goals: List<Goal>, syncing: Boolean, onSaveGoal: (Goal) -> Unit
                     AnimatedBar(fraction = if (g.target > 0) g.saved.toFloat() / g.target else 0f, fillColor = if (done) Green else Blue)
                     Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LiquidButton(onClick = { topupGoal = g }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(42.dp)) {
+                        Surface(onClick = { topupGoal = g }, shape = CircleShape, color = Blue, modifier = Modifier.weight(1f).height(42.dp)) {
                             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("+ Tambah Dana", color = OnBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
                         }
-                        LiquidButton(onClick = { editingGoal = g; showDialog = true }, shape = CircleShape, color = Card2, modifier = Modifier.height(42.dp)) {
+                        Surface(onClick = { editingGoal = g; showDialog = true }, shape = CircleShape, color = Card2, modifier = Modifier.height(42.dp)) {
                             Box(Modifier.padding(horizontal = 16.dp), Alignment.Center) { Text("Ubah", color = White, fontSize = 13.sp) }
                         }
                     }
@@ -1258,7 +1258,7 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .themeBg()
+            .background(BG)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
@@ -1270,7 +1270,7 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LiquidButton(onClick = onClose, shape = CircleShape, color = Card2) {
+                Surface(onClick = onClose, shape = CircleShape, color = Card2) {
                     Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
                 }
                 Text(if (goal == null) "Target baru" else "Ubah target", color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
@@ -1334,10 +1334,10 @@ fun GoalDialog(goal: Goal?, onSave: (Goal) -> Unit, onDelete: (() -> Unit)?, onC
         Spacer(Modifier.height(12.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LiquidButton(onClick = onClose, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(52.dp)) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(52.dp)) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Batal", color = Muted, fontWeight = FontWeight.Medium) }
             }
-            LiquidButton(
+            Surface(
                 onClick = {
                     val tg = target.toLongOrNull() ?: 0L
                     val sv = saved.toLongOrNull() ?: 0L
@@ -1361,7 +1361,7 @@ fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .themeBg()
+            .background(BG)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
@@ -1372,7 +1372,7 @@ fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            LiquidButton(onClick = onClose, shape = CircleShape, color = Card2) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2) {
                 Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
             }
             Text("Tambah ke " + goal.title, color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1402,10 +1402,10 @@ fun TopupGoalDialog(goal: Goal, onAdd: (Long) -> Unit, onClose: () -> Unit) {
         Spacer(Modifier.height(12.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LiquidButton(onClick = onClose, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(52.dp)) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(52.dp)) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Batal", color = Muted, fontWeight = FontWeight.Medium) }
             }
-            LiquidButton(
+            Surface(
                 onClick = { val v = amount.toLongOrNull() ?: 0L; if (v > 0) onAdd(v) },
                 shape = CircleShape,
                 color = Blue,
@@ -1432,9 +1432,9 @@ fun SearchScreen(all: List<Tx>, onClose: () -> Unit, onEdit: (Tx) -> Unit) {
                 (digits.isNotEmpty() && t.a.toString().contains(digits)))
     }.sortedByDescending { it.d }
     val s = totals(res)
-    Column(Modifier.fillMaxSize().themeBg().statusBarsPadding().imePadding().padding(horizontal = 20.dp)) {
+    Column(Modifier.fillMaxSize().background(BG).statusBarsPadding().imePadding().padding(horizontal = 20.dp)) {
         Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LiquidButton(onClick = onClose, shape = CircleShape, color = Card2) {
+            Surface(onClick = onClose, shape = CircleShape, color = Card2) {
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Kembali", tint = White, modifier = Modifier.padding(12.dp).size(22.dp))
             }
             TextField(
@@ -1452,7 +1452,7 @@ fun SearchScreen(all: List<Tx>, onClose: () -> Unit, onEdit: (Tx) -> Unit) {
             listOf("Semua", "Pemasukan", "Pengeluaran").forEachIndexed { i, t -> FilterChip(type == i, { type = i }, { Text(t) }) }
         }
         Text(res.size.toString() + " hasil  ·  selisih " + rp(s.inc - s.exp), color = Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
-        LazyColumn(Modifier.weight(1f).scrollEdges(), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
             if (res.isEmpty()) item { Text(if (all.isEmpty()) "Belum ada transaksi." else "Tidak ada transaksi yang cocok.", color = Muted, fontSize = 14.sp) }
             items(res, key = { it.id }) { t -> TxRow(t, showDate = true) { onEdit(t) } }
         }
@@ -1480,7 +1480,7 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
     val dI = s.inc - sp.inc
     val dX = s.exp - sp.exp
 
-    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().scrollEdges().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)) {
+    LazyColumn(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 120.dp)) {
         item { Text("Laporan", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp) }
         item {
             Panel {
@@ -1542,83 +1542,41 @@ fun ReportScreen(all: List<Tx>, mode: Int, onMode: (Int) -> Unit, anchor: LocalD
 
 @Composable
 fun AvatarPopupDialog(user: String, currentType: Int, onSelect: (Int) -> Unit, onDismiss: () -> Unit) {
-    AppDialog(onDismiss) {
-        Text("Pilih Avatar", color = White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(14.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            AVATARS.forEachIndexed { idx, label ->
-                val selected = currentType == idx
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { onSelect(idx); onDismiss() }
-                        .background(if (selected) Card2 else Color.Transparent)
-                        .border(
-                            width = if (selected) 1.5.dp else 0.dp,
-                            color = if (selected) Lime else Color.Transparent,
-                            shape = RoundedCornerShape(16.dp)
-                        )
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                ) {
-                    Avatar(user, 50.dp, Blue, type = idx)
-                    Spacer(Modifier.height(6.dp))
-                    Text(label, color = if (selected) Lime else Muted, fontSize = 11.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-                }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        TextButton(onDismiss, Modifier.align(Alignment.End)) { Text("Tutup", color = Blue) }
-    }
-}
-
-/* ---------- Tema ---------- */
-@Composable
-fun ThemeSwatch(id: Int) {
-    val p = palFor(id, ThemeState.systemDark)
-    val base = if (id == THEME_GLASS) Modifier.background(Brush.linearGradient(listOf(Color(0xFF3FB0FF), Color(0xFF7A4DFF), Color(0xFFFF5CAD))))
-    else Modifier.background(p.bg)
-    Box(Modifier.size(38.dp).clip(CircleShape).then(base).border(1.dp, Muted.copy(alpha = 0.4f), CircleShape), Alignment.Center) {
-        Box(Modifier.size(14.dp).clip(CircleShape).background(if (id == THEME_GLASS) Color.White.copy(alpha = 0.85f) else p.lime))
-    }
-}
-
-@Composable
-fun ThemePanel(st: Store) {
-    Panel {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconCircle(Icons.Rounded.Palette)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("Tema", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text("Pilih tampilan aplikasi", color = Muted, fontSize = 12.sp)
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        THEME_NAMES.forEachIndexed { i, name ->
-            val sel = ThemeState.id == i
-            Surface(
-                onClick = { ThemeState.id = i; st.theme = i },
-                shape = RoundedCornerShape(18.dp),
-                color = if (sel) Card2 else Color.Transparent,
-                border = BorderStroke(if (sel) 1.5.dp else 1.dp, if (sel) Lime else Card2),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = CardC,
+        title = { Text("Pilih Avatar", color = White) },
+        text = {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(Modifier.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ThemeSwatch(i)
-                    Column(Modifier.weight(1f)) {
-                        Text(name, color = White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text(THEME_HINTS[i], color = Muted, fontSize = 12.sp)
+                AVATARS.forEachIndexed { idx, label ->
+                    val selected = currentType == idx
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onSelect(idx); onDismiss() }
+                            .background(if (selected) Card2 else Color.Transparent)
+                            .border(
+                                width = if (selected) 1.5.dp else 0.dp,
+                                color = if (selected) Lime else Color.Transparent,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Avatar(user, 50.dp, Blue, type = idx)
+                        Spacer(Modifier.height(6.dp))
+                        Text(label, color = if (selected) Lime else Muted, fontSize = 11.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
                     }
-                    if (sel) Icon(Icons.Rounded.Check, "Dipilih", tint = Lime, modifier = Modifier.size(20.dp))
                 }
             }
-        }
-    }
+        },
+        confirmButton = { TextButton(onDismiss) { Text("Tutup", color = Blue) } }
+    )
 }
 
 /* ---------- Kunci aplikasi (PIN + sidik jari) ---------- */
@@ -1707,7 +1665,7 @@ fun LockScreen(st: Store, onUnlock: () -> Unit) {
     }
 
     Column(
-        Modifier.fillMaxSize().themeBg().pointerInput(Unit) { detectTapGestures { } }.systemBarsPadding().padding(28.dp),
+        Modifier.fillMaxSize().background(BG).pointerInput(Unit) { detectTapGestures { } }.systemBarsPadding().padding(28.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -1757,7 +1715,7 @@ fun SecurityPanel(st: Store) {
                 Text("Kunci aplikasi", color = White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 Text(if (lockOn) "Aktif, PIN $PIN_LEN angka" else "Minta PIN setiap membuka aplikasi", color = Muted, fontSize = 12.sp)
             }
-            IosSwitch(checked = lockOn, onCheckedChange = { on -> err = ""; flow = if (on) 3 else 1 })
+            Switch(checked = lockOn, onCheckedChange = { on -> err = ""; flow = if (on) 3 else 1 })
         }
         if (lockOn) {
             Spacer(Modifier.height(14.dp))
@@ -1766,17 +1724,21 @@ fun SecurityPanel(st: Store) {
                     Text("Buka dengan sidik jari", color = White, fontSize = 14.sp)
                     if (!bioAvailable) Text("Belum ada sidik jari terdaftar di perangkat ini", color = Muted, fontSize = 12.sp)
                 }
-                IosSwitch(checked = bioOn && bioAvailable, enabled = bioAvailable, onCheckedChange = { bioOn = it; st.bio = it })
+                Switch(checked = bioOn && bioAvailable, enabled = bioAvailable, onCheckedChange = { bioOn = it; st.bio = it })
             }
             Spacer(Modifier.height(10.dp))
-            LiquidButton(onClick = { err = ""; flow = 2 }, shape = CircleShape, color = Card2, modifier = Modifier.fillMaxWidth().height(44.dp)) {
+            Surface(onClick = { err = ""; flow = 2 }, shape = CircleShape, color = Card2, modifier = Modifier.fillMaxWidth().height(44.dp)) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Ubah PIN", color = White, fontWeight = FontWeight.Medium, fontSize = 14.sp) }
             }
         }
     }
 
     if (flow != 0) {
-        AppDialog(onDismiss = { close() }) {
+        AlertDialog(
+            onDismissRequest = { close() },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = CardC,
+            text = {
                 PinEntry(
                     title = when (flow) {
                         1 -> "Nonaktifkan kunci"
@@ -1800,8 +1762,10 @@ fun SecurityPanel(st: Store) {
                         }
                     }
                 )
-                TextButton(onClick = { close() }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Batal", color = Muted) }
-        }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { close() }) { Text("Batal", color = Muted) } }
+        )
     }
 }
 
@@ -1818,7 +1782,7 @@ fun SettingsScreen(
     val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
     Column(
-        Modifier.fillMaxSize().statusBarsPadding().scrollEdges().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 120.dp),
+        Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Pengaturan", color = White, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp)
@@ -1853,7 +1817,6 @@ fun SettingsScreen(
                 }
             }
         }
-        ThemePanel(st)
         SecurityPanel(st)
         if (dev) Panel {
             Text("Mode pengembang", color = Lime, fontSize = 16.sp, fontWeight = FontWeight.Medium)
@@ -1863,15 +1826,15 @@ fun SettingsScreen(
             Text("Bawaan: " + DEFAULT_SHEET_URL, color = Muted, fontSize = 12.sp)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LiquidButton(onClick = { u = DEFAULT_SHEET_URL; onUrl("") }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
+                Surface(onClick = { u = DEFAULT_SHEET_URL; onUrl("") }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
                     Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Setel ulang", color = White, fontWeight = FontWeight.Medium) }
                 }
-                LiquidButton(onClick = { onDev(false) }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
+                Surface(onClick = { onDev(false) }, shape = CircleShape, color = Card2, modifier = Modifier.weight(1f).height(48.dp)) {
                     Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Tutup", color = White, fontWeight = FontWeight.Medium) }
                 }
             }
         }
-        LiquidButton(onClick = onLogout, shape = CircleShape, color = BG, border = BorderStroke(1.dp, Red.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth().height(52.dp)) {
+        Surface(onClick = onLogout, shape = CircleShape, color = BG, border = BorderStroke(1.dp, Red.copy(alpha = 0.6f)), modifier = Modifier.fillMaxWidth().height(52.dp)) {
             Box(Modifier.fillMaxSize(), Alignment.Center) { Text("Keluar", color = Red, fontWeight = FontWeight.Medium) }
         }
         Text(
@@ -1902,7 +1865,7 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .themeBg()
+            .background(BG)
             .statusBarsPadding()
             .navigationBarsPadding()
             .imePadding()
@@ -1914,7 +1877,7 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LiquidButton(onClick = onClose, shape = CircleShape, color = Card2) {
+                Surface(onClick = onClose, shape = CircleShape, color = Card2) {
                     Icon(Icons.Rounded.Close, "Tutup", tint = White, modifier = Modifier.padding(10.dp).size(20.dp))
                 }
                 Text(
@@ -1978,7 +1941,7 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
         Spacer(Modifier.height(12.dp))
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LiquidButton(
+            Surface(
                 onClick = onClose,
                 shape = CircleShape,
                 color = Card2,
@@ -1988,7 +1951,7 @@ fun Form(t: Tx?, initialIncome: Boolean, onSave: (Tx) -> Unit, onDel: (() -> Uni
                     Text("Batal", color = Muted, fontWeight = FontWeight.Medium)
                 }
             }
-            LiquidButton(
+            Surface(
                 onClick = {
                     val a = amt.toLongOrNull() ?: 0L
                     if (a > 0) onSave(Tx(t?.id ?: System.currentTimeMillis(), date, inc, cat, a, note.trim()))

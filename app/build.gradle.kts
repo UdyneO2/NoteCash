@@ -15,8 +15,8 @@ android {
         applicationId = "com.udyne.notecash"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.6"
+        versionCode = 7
+        versionName = "1.7"
     }
     signingConfigs {
         if (releaseKeystore != null) {
@@ -60,6 +60,4 @@ dependencies {
     // BiometricPrompt versi stabil membutuhkan FragmentActivity.
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.8")
-    // Efek Liquid Glass untuk Compose (backdrop + lensa). Dokumentasi: kyant.gitbook.io/backdrop
-    implementation("io.github.kyant0:backdrop:1.0.6")
 }

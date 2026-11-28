@@ -1,51 +1,39 @@
 package com.udyne.notecash
 
-import android.os.Build
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.CornerBasedShape
-import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
-import com.kyant.backdrop.effects.vibrancy
 
 const val THEME_DARK = 0
 const val THEME_LIGHT = 1
 const val THEME_AMOLED = 2
-const val THEME_GLASS = 3
 const val THEME_SYSTEM = 4
 
-val THEME_NAMES = listOf("Gelap", "Terang", "AMOLED hitam", "Liquid Glass", "Ikuti sistem")
-val THEME_HINTS = listOf(
-    "Biru gelap, tema bawaan",
-    "Latar terang untuk siang hari",
-    "Hitam pekat, hemat baterai di layar AMOLED",
-    "Kaca bening dengan efek bias ala iOS. Efek penuh di Android 13 ke atas",
-    "Gelap atau terang mengikuti pengaturan Android"
-)
+/** Urutan saat tombol tema ditekan: auto, siang, malam, amoled. */
+val THEME_CYCLE = listOf(THEME_SYSTEM, THEME_LIGHT, THEME_DARK, THEME_AMOLED)
+
+fun themeLabel(id: Int): String = when (id) {
+    THEME_LIGHT -> "Siang"
+    THEME_DARK -> "Malam"
+    THEME_AMOLED -> "Amoled"
+    else -> "Auto"
+}
+
+fun nextTheme(id: Int): Int {
+    val i = THEME_CYCLE.indexOf(if (id in THEME_CYCLE) id else THEME_DARK)
+    return THEME_CYCLE[(i + 1) % THEME_CYCLE.size]
+}
 
 /** Satu set warna lengkap untuk sebuah tema. */
 class Pal(
     val bg: Color, val card: Color, val card2: Color,
     val blue: Color, val lime: Color, val green: Color, val red: Color,
     val muted: Color, val text: Color, val onLime: Color,
-    val dark: Boolean, val glass: Boolean = false
+    val dark: Boolean
 )
 
 val PalDark = Pal(
@@ -63,22 +51,16 @@ val PalLight = Pal(
     blue = Color(0xFF0A7FD0), lime = Color(0xFFC4E73A), green = Color(0xFF16A34A), red = Color(0xFFE5383B),
     muted = Color(0xFF677085), text = Color(0xFF111522), onLime = Color(0xFF111522), dark = false
 )
-val PalGlass = Pal(
-    bg = Color(0xFF0A1030), card = Color(0xF2182340), card2 = Color(0x33FFFFFF),
-    blue = Color(0xFF3FB0FF), lime = Color(0xFFD4F34A), green = Color(0xFF3EE08F), red = Color(0xFFFF6B6E),
-    muted = Color(0xFFB9C3E3), text = Color(0xFFFFFFFF), onLime = Color(0xFF0A1030), dark = true, glass = true
-)
 
 /** Tema aktif. Dibaca di dalam composable, jadi semua layar ikut berubah saat nilainya diganti. */
 object ThemeState {
-    var id by mutableStateOf(THEME_DARK)
+    var id by mutableStateOf(THEME_SYSTEM)
     var systemDark by mutableStateOf(true)
 }
 
 fun palFor(id: Int, systemDark: Boolean): Pal = when (id) {
     THEME_LIGHT -> PalLight
     THEME_AMOLED -> PalAmoled
-    THEME_GLASS -> PalGlass
     THEME_SYSTEM -> if (systemDark) PalDark else PalLight
     else -> PalDark
 }
@@ -97,7 +79,6 @@ val White: Color get() = CurPal.text
 val OnLime: Color get() = CurPal.onLime
 /** Teks di atas tombol atau kartu biru selalu putih, apa pun temanya. */
 val OnBlue: Color = Color.White
-val GlassEdge: Color = Color.White.copy(alpha = 0.22f)
 
 fun palScheme(p: Pal): ColorScheme =
     if (p.dark) darkColorScheme(
@@ -113,51 +94,3 @@ fun palScheme(p: Pal): ColorScheme =
         surfaceContainer = p.card, surfaceContainerHigh = p.card, surfaceVariant = p.card2, onSurfaceVariant = p.muted,
         outline = Color(0xFFC3C9D8), error = p.red
     )
-
-/* ---------- Liquid glass ---------- */
-
-/** Backdrop yang disampel kartu kaca. Null berarti tema aktif bukan Liquid Glass. */
-val LocalBackdrop = compositionLocalOf<LayerBackdrop?> { null }
-
-/** Latar berwarna (gradasi dan gumpalan cahaya) yang dibiaskan oleh kartu kaca. */
-fun DrawScope.drawGlassBackdrop() {
-    drawRect(Brush.verticalGradient(listOf(Color(0xFF0A1030), Color(0xFF1A1048), Color(0xFF082B45))))
-    val m = maxOf(size.width, size.height)
-    fun blob(cx: Float, cy: Float, r: Float, c: Color) {
-        val center = Offset(cx, cy)
-        drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), center, r), r, center)
-    }
-    blob(size.width * 0.15f, size.height * 0.12f, m * 0.55f, Color(0xAA2F9BFF))
-    blob(size.width * 0.95f, size.height * 0.35f, m * 0.50f, Color(0x99B14DFF))
-    blob(size.width * 0.10f, size.height * 0.62f, m * 0.45f, Color(0x8800D1B2))
-    blob(size.width * 0.85f, size.height * 0.88f, m * 0.55f, Color(0x88FF5CAD))
-}
-
-/** Latar layar penuh: warna polos untuk tema biasa, gradasi kaca untuk Liquid Glass. */
-fun Modifier.themeBg(): Modifier = if (CurPal.glass) drawBehind { drawGlassBackdrop() } else background(BG)
-
-/**
- * Menjadikan komponen kaca: blur + vibrancy (Android 12+), bias lensa (Android 13+) dan tepi bercahaya.
- * Tanpa backdrop (tema lain) modifier ini tidak melakukan apa-apa.
- * [radiusDp] harus sama dengan radius sudut bentuknya.
- */
-@Composable
-fun Modifier.glass(shape: CornerBasedShape, radiusDp: Float, useLens: Boolean = true): Modifier {
-    val backdrop = LocalBackdrop.current ?: return this
-    val fx = Build.VERSION.SDK_INT >= 31
-    val lensOk = useLens && Build.VERSION.SDK_INT >= 33
-    return this
-        .drawBackdrop(
-            backdrop = backdrop,
-            shape = { shape },
-            effects = {
-                if (fx) {
-                    vibrancy()
-                    blur(6f.dp.toPx())
-                    if (lensOk) lens((radiusDp * 0.5f).dp.toPx(), (radiusDp * 1.0f).dp.toPx())
-                }
-            },
-            onDrawSurface = { drawRect(Color.White.copy(alpha = if (fx) 0.10f else 0.22f)) }
-        )
-        .border(1.dp, GlassEdge, shape)
-}
